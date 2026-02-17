@@ -1,0 +1,17 @@
+{
+  "name": "@betterbase/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@betterbase/shared": "workspace:*"
+  },
+  "scripts": {
+    "build": "echo 'client: no build step yet'",
+    "dev": "echo 'client: no dev step yet'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

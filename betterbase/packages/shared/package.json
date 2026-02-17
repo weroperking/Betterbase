@@ -1,0 +1,14 @@
+{
+  "name": "@betterbase/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "echo 'shared: no build step yet'",
+    "dev": "echo 'shared: no dev step yet'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

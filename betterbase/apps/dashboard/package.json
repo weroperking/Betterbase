@@ -1,0 +1,11 @@
+{
+  "name": "@betterbase/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'dashboard: no build step yet'",
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

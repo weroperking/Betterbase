@@ -1,0 +1,17 @@
+{
+  "name": "@betterbase/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@betterbase/shared": "workspace:*"
+  },
+  "scripts": {
+    "build": "echo 'core: no build step yet'",
+    "dev": "echo 'core: no dev step yet'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
