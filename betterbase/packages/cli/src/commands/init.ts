@@ -20,6 +20,12 @@ type DatabaseMode = z.infer<typeof databaseModeSchema>;
 
 export type InitCommandOptions = z.infer<typeof initOptionsSchema>;
 
+/**
+ * Get a human-readable label for a chosen database mode.
+ *
+ * @param databaseMode - The database mode; one of 'local', 'neon', or 'turso'
+ * @returns The label: `'Neon (serverless Postgres)'` for `'neon'`, `'Turso (edge SQLite)'` for `'turso'`, or `'SQLite (local.db)'` for `'local'` and other values
+ */
 function getDatabaseLabel(databaseMode: DatabaseMode): string {
   if (databaseMode === 'neon') {
     return 'Neon (serverless Postgres)';
@@ -32,6 +38,12 @@ function getDatabaseLabel(databaseMode: DatabaseMode): string {
   return 'SQLite (local.db)';
 }
 
+/**
+ * Installs project dependencies in the specified project directory using Bun.
+ *
+ * @param projectPath - File system path to the project directory where dependencies will be installed
+ * @throws Error if the install process exits with a non-zero code; message suggests running `bun install` manually
+ */
 async function installDependencies(projectPath: string): Promise<void> {
   const installProcess = Bun.spawn(['bun', 'install'], {
     cwd: projectPath,
@@ -46,6 +58,13 @@ async function installDependencies(projectPath: string): Promise<void> {
   }
 }
 
+/**
+ * Initializes a Git repository inside the specified project directory.
+ *
+ * Attempts to run `git init` in the provided path and logs a warning if initialization fails.
+ *
+ * @param projectPath - Filesystem path of the project directory where the repository should be initialized
+ */
 async function initializeGitRepository(projectPath: string): Promise<void> {
   const gitProcess = Bun.spawn(['git', 'init'], {
     cwd: projectPath,
@@ -60,6 +79,16 @@ async function initializeGitRepository(projectPath: string): Promise<void> {
   }
 }
 
+/**
+ * Build the contents of a package.json tailored to the chosen project settings.
+ *
+ * The generated package JSON includes the project name, `private: true`, `"type": "module"`, standard scripts for development and Drizzle, a `dependencies` object that varies by `databaseMode` and `useAuth`, and a set of `devDependencies`.
+ *
+ * @param projectName - The package `name` field to use in package.json
+ * @param databaseMode - The selected database mode; determines which database client dependency is included
+ * @param useAuth - Whether to include the authentication library dependency
+ * @returns A pretty-printed JSON string representing the package.json contents (with a trailing newline)
+ */
 function buildPackageJson(projectName: string, databaseMode: DatabaseMode, useAuth: boolean): string {
   const dependencies: Record<string, string> = {
     hono: '^4.11.9',
@@ -103,6 +132,12 @@ function buildPackageJson(projectName: string, databaseMode: DatabaseMode, useAu
   return `${JSON.stringify(json, null, 2)}\n`;
 }
 
+/**
+ * Builds the content of a drizzle.config.ts file configured for the given database mode.
+ *
+ * @param databaseMode - The selected database mode ('local', 'neon', or 'turso') used to choose the Drizzle dialect
+ * @returns The TypeScript source for a Drizzle configuration that sets schema path, output directory, chosen dialect, and `dbCredentials.url` (falling back to `file:local.db`)
+ */
 function buildDrizzleConfig(databaseMode: DatabaseMode): string {
   const dialect: Record<DatabaseMode, 'sqlite' | 'postgresql' | 'turso'> = {
     local: 'sqlite',
@@ -123,6 +158,12 @@ export default defineConfig({
 `;
 }
 
+/**
+ * Produce the TypeScript source for a Drizzle ORM `users` schema tailored to the chosen database mode.
+ *
+ * @param databaseMode - The target database mode (`'local'`, `'neon'`, or `'turso'`) used to select the appropriate dialect and schema shape
+ * @returns A string containing the generated TypeScript schema file content for a `users` table compatible with the selected database dialect
+ */
 function buildSchema(databaseMode: DatabaseMode): string {
   if (databaseMode === 'neon') {
     return `import { integer, pgTable, timestamp, varchar } from 'drizzle-orm/pg-core';
@@ -147,6 +188,12 @@ export const users = sqliteTable('users', {
 `;
 }
 
+/**
+ * Generate the TypeScript source for a database index module configured for the specified database mode.
+ *
+ * @param databaseMode - The target database mode: `'local'` produces a Bun SQLite client, `'neon'` produces a node-postgres Pool with Drizzle, and `'turso'` produces a @libsql/client with Drizzle.
+ * @returns The source code string of a module that initializes and exports a configured `db` instance wired to the generated `schema`.
+ */
 function buildDbIndex(databaseMode: DatabaseMode): string {
   if (databaseMode === 'neon') {
     return `import { drizzle } from 'drizzle-orm/node-postgres';
@@ -184,6 +231,11 @@ export const db = drizzle(client, { schema });
 `;
 }
 
+/**
+ * Generate TypeScript source for a minimal Hono authentication middleware placeholder.
+ *
+ * @returns A string containing TypeScript source that exports `authMiddleware` as a Hono middleware which currently forwards requests (`await next()`) and includes a `TODO` comment to implement session validation.
+ */
 function buildAuthMiddleware(): string {
   return `import { createMiddleware } from 'hono/factory';
 
@@ -194,6 +246,11 @@ export const authMiddleware = createMiddleware(async (_c, next) => {
 `;
 }
 
+/**
+ * Generate README.md content for a new project.
+ *
+ * @returns The README content string including the project title and recommended Bun scripts: `bun run dev`, `bun run db:generate`, and `bun run db:push`.
+ */
 function buildReadme(projectName: string): string {
   return `# ${projectName}
 
@@ -207,6 +264,14 @@ Generated with BetterBase CLI.
 `;
 }
 
+/**
+ * Scaffold a new project at the given path by creating directories and writing generated configuration, source, and helper files according to the chosen database mode and authentication option.
+ *
+ * @param projectPath - Filesystem path where the project will be created
+ * @param projectName - Name used in the generated package.json and README
+ * @param databaseMode - Selected database mode used to tailor DB config, schema, and wiring (`local`, `neon`, or `turso`)
+ * @param useAuth - Include authentication middleware and related configuration when true
+ */
 async function writeProjectFiles(
   projectPath: string,
   projectName: string,
@@ -381,7 +446,9 @@ export default server;
 }
 
 /**
- * Run the `bb init` command.
+ * Scaffolds a new BetterBase project by prompting for options, creating files, installing dependencies, and optionally initializing git.
+ *
+ * @param rawOptions - Partial CLI options used to pre-fill prompts (e.g., `projectName`)
  */
 export async function runInitCommand(rawOptions: InitCommandOptions): Promise<void> {
   const options = initOptionsSchema.parse(rawOptions);

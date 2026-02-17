@@ -1,5 +1,10 @@
 /**
- * Build the CLI as a standalone bundled executable output.
+ * Builds the CLI into a standalone bundled executable and prefixes the output with a Bun shebang.
+ *
+ * If the build fails, this function throws an Error whose message includes the number of build logs.
+ * On success, it writes the bundled file to ./dist/index.js and prepends "#!/usr/bin/env bun" so the file can be executed directly.
+ *
+ * @throws Error When the Bun build reports failure; the error message contains the count of build logs.
  */
 export async function buildStandaloneCli(): Promise<void> {
   const result = await Bun.build({

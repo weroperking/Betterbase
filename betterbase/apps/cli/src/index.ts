@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Legacy bb wrapper entrypoint.
+ * Entrypoint for the legacy "bb" CLI that delegates to the canonical CLI implementation.
  *
- * Forwards execution to the canonical CLI implementation in packages/cli.
+ * Dynamically imports the canonical CLI module and invokes it with the current process arguments.
  */
 export async function runLegacyCli(): Promise<void> {
   const cliModule = await import('../../../packages/cli/src/index');

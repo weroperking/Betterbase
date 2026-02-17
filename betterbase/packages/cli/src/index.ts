@@ -6,6 +6,8 @@ import packageJson from '../package.json';
 
 /**
  * Create and configure the BetterBase CLI program.
+ *
+ * @returns The configured Commander `Command` instance for the CLI.
  */
 export function createProgram(): Command {
   const program = new Command();
@@ -35,7 +37,9 @@ export function createProgram(): Command {
 }
 
 /**
- * Execute the CLI with process arguments.
+ * Run the BetterBase CLI with the given command-line arguments.
+ *
+ * @param argv - Argument vector to parse; defaults to `process.argv`
  */
 export async function runCli(argv: string[] = process.argv): Promise<void> {
   const program = createProgram();

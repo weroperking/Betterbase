@@ -23,7 +23,11 @@ const selectOptionsSchema = z.object({
 });
 
 /**
- * Prompt for text input.
+ * Prompts the user to enter text using the provided message.
+ *
+ * @param options.message - The prompt message shown to the user
+ * @param options.initial - Optional default value prefilled in the input
+ * @returns The text entered by the user
  */
 export async function text(options: { message: string; initial?: string }): Promise<string> {
   const parsed = textOptionsSchema.parse(options);
@@ -41,7 +45,11 @@ export async function text(options: { message: string; initial?: string }): Prom
 }
 
 /**
- * Prompt for yes/no confirmation.
+ * Prompt the user with a yes/no confirmation.
+ *
+ * @param options.message - The message to display to the user
+ * @param options.initial - The default selection if the user just presses Enter
+ * @returns `true` if the user confirms, `false` otherwise.
  */
 export async function confirm(options: { message: string; initial?: boolean }): Promise<boolean> {
   const parsed = confirmOptionsSchema.parse(options);
@@ -59,7 +67,13 @@ export async function confirm(options: { message: string; initial?: boolean }): 
 }
 
 /**
- * Prompt for selecting one option.
+ * Prompt the user to choose one option from a list.
+ *
+ * @param options - Configuration for the prompt:
+ *   - `message`: The text displayed to the user.
+ *   - `choices`: Array of choices where each item has a `name` (label shown) and `value` (returned value).
+ *   - `initial`: Optional `value` to select by default.
+ * @returns The `value` of the selected choice
  */
 export async function select(
   options: { message: string; choices: Array<{ name: string; value: string }>; initial?: string },
