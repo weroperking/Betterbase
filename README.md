@@ -11,9 +11,9 @@
 ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝    ╚═════╝  ╚══╝ ╚══╝ ╚══════╝
 ```
 
-**The AI-Native Backend-as-a-Service Platform**
+**The AI-native Backend-as-a-Service platform**
 
-Blazing-fast backend development with Sub-100ms Local Dev — Built on Bun + SQLite, deploy anywhere with PostgreSQL support.
+Blazing-fast backend development with sub-100ms local dev. Built on Bun + SQLite, and deployable anywhere with PostgreSQL support.
 
 *Database • Authentication • Realtime Subscriptions • Storage • Serverless Functions • Vector Search*
 
@@ -51,12 +51,12 @@ Blazing-fast backend development with Sub-100ms Local Dev — Built on Bun + SQL
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| | TraditionalBAAS | Betterbase |
+| | Traditional BaaS | Betterbase |
 |--|------------------|------------|
 | ⚡ | Slow local dev | **Sub-100ms dev** with Bun + SQLite |
 | 🗄️ | Black box DB | **Full PostgreSQL** with raw SQL access |
 | 🔍 | Basic search | **Full-text + Vector search** built-in |
-| 🚀 | Cloud lock-in | **Self-host anywhere** with Docker |
+| 🚀 | Cloud lock-in | **Self-hosted anywhere** with Docker |
 | 📊 | Limited analytics | **Full observability** out of the box |
 | 🔐 | Closed source | **100% open source** - deploy anywhere |
 
@@ -162,17 +162,17 @@ Your backend runs at `http://localhost:3000`. The dashboard is at `http://localh
 |---------|-------------|
 | **IaC Layer** | Convex-inspired: define schema + functions in TypeScript |
 | **Auto-Realtime** | Queries auto-subscribe to changes |
-| **Type Safety** | Full TypeScript inference, no code generation needed |
-| **Migrations** | Automatic diff + apply on `bb dev` |
+| **Type Safety** | Full TypeScript inference; no code generation needed |
+| **Migrations** | Automatically diff and apply changes on `bb dev` |
 | **Raw SQL** | `ctx.db.execute()` for complex queries |
 | **Full-Text Search** | PostgreSQL GIN indexes via `ctx.db.search()` |
 | **Vector Search** | pgvector + HNSW for embeddings |
-| **Serverless Functions** | Deploy custom API functions |
+| **Serverless Functions** | Deploy custom API endpoints and functions |
 | **Storage** | S3-compatible object storage |
 | **Webhooks** | Event-driven with signed payloads |
 | **Background Jobs** | Durable workflows via Inngest |
 | **RLS** | Row-level security policies |
-| **Branching** | Preview environments per branch |
+| **Branching** | Preview environments for each branch |
 
 ---
 
@@ -187,7 +187,7 @@ Your backend runs at `http://localhost:3000`. The dashboard is at `http://localh
 | Self-Hosting | Not supported | Docker to your infra |
 | Migration | — | `bb migrate from-convex` |
 
-**Betterbase gives you Convex simplicity with full SQL power.**
+**Betterbase gives you Convex-style simplicity with full SQL power.**
 
 ---
 
@@ -199,7 +199,7 @@ Betterbase uses [Inngest](https://www.inngest.com/) for durable workflows and ba
 
 | Mode | Inngest Backend | Used By |
 |------|----------------|---------|
-| Cloud | `https://api.inngest.com` | BetterBase Cloud offering |
+| Cloud | `https://api.inngest.com` | Betterbase Cloud offering |
 | Self-Hosted | `http://inngest:8288` | Docker deployment |
 | Local Dev | `http://localhost:8288` | Development and testing |
 
@@ -225,7 +225,7 @@ INNGEST_EVENT_KEY=your-event-key
 
 ## Project Structure
 
-Betterbase supports two patterns:
+Betterbase supports two development patterns:
 
 ### 1. IaC Pattern (Recommended)
 
@@ -263,11 +263,11 @@ Both patterns work together. Add `betterbase/` to any existing project.
 
 | Command | Description |
 |---------|-------------|
-| `bb init [name]` | Create new project |
-| `bb dev` | Start dev server |
-| `bb iac sync` | Sync IaC schema |
+| `bb init [name]` | Create a new project |
+| `bb dev` | Start the development server |
+| `bb iac sync` | Sync the IaC schema |
 | `bb iac analyze` | Analyze query performance |
-| `bb migrate` | Run migrations |
+| `bb migrate` | Run database migrations |
 | `bb generate types` | Generate TypeScript types |
 
 ---
@@ -314,7 +314,7 @@ docker-compose up -d
 
 ### Self-Hosted
 
-See [SELF_HOSTED.md](SELF_HOSTED.md) for full documentation.
+See [SELF_HOSTED.md](SELF_HOSTED.md) for full setup documentation.
 
 ```typescript
 database: {
@@ -407,7 +407,7 @@ export const auth = betterAuth({
 
 ### Row Level Security
 
-Betterbase integrates with database RLS for secure data access:
+Betterbase integrates with database-level RLS for secure data access:
 
 ```typescript
 // In your schema or via CLI
@@ -422,25 +422,25 @@ This ensures users can only access their own data.
 
 ---
 
-## Ask Deepwiki
+## Ask DeepWiki
 
 > *Your AI-powered development assistant, integrated directly into Betterbase.*
 
-Ask Deepwiki provides intelligent context for AI-assisted development:
+Ask DeepWiki provides intelligent context for AI-assisted development:
 
 - **Smart Code Context**: Automatic `.betterbase-context.json` generation
 - **IaC Analysis**: Understand your schema, queries, and mutations
 - **Query Optimization**: Get recommendations for better performance
 - **Documentation Generation**: Auto-generate docs from your code
 
-**Deepwiki Badge**: The badge at the top of this README links to [Ask Deepwiki](https://deepwiki.com/weroperking/Betterbase), where you can chat with an AI that understands your entire Betterbase project.
+**DeepWiki Badge**: The badge at the top of this README links to [Ask DeepWiki](https://deepwiki.com/weroperking/Betterbase), where you can chat with an AI that understands your entire Betterbase project.
 
 ### Using Ask Deepwiki
 
 1. **Development**: Get instant answers about your IaC layer
-2. **Debugging**: Understand query behavior and optimization
-3. **Onboarding**: New team members can ask about your architecture
-4. **Refactoring**: Get AI suggestions for improving your code
+2. **Debugging**: Understand query behavior and optimization opportunities
+3. **Onboarding**: Help new team members quickly understand your architecture
+4. **Refactoring**: Get AI suggestions to improve your code
 
 ---
 
@@ -563,7 +563,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be repor
 
 ## Changelog
 
-All notable changes to this project will be documented in this section.
+All notable changes to this project are documented in this section.
 
 ### [1.0.0] - 2026-03-19
 
