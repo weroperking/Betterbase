@@ -14,7 +14,7 @@ import { getPool } from "../../lib/db";
 import { validateEnv } from "../../lib/env";
 
 // Import WS handler for stats
-import { createWSTicket, getWSStats } from "./ws";
+import { createWSTicket, getWSStats, WS_TICKET_TTL_MS } from "./ws";
 
 // Import S3 utilities
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -40,6 +40,11 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 	const fn = lookupFunction(path);
 	if (!fn) return c.json({ error: `Function not found: ${path}` }, 404);
 
+	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+		return c.json({ error: "Invalid project slug" }, 400);
+	}
+
 	// Parse body
 	let args: unknown;
 	try {
@@ -63,10 +68,6 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 
 	// Build DB context
 	const pool = getPool();
-	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
-	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
-		return c.json({ error: "Invalid project slug" }, 400);
-	}
 	const dbSchema = `project_${projectSlug}`;
 
 	try {
@@ -107,6 +108,11 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 // Storage context builder
 function buildStorageCtx(pool: any, projectSlug: string): StorageCtx {
 	const env = validateEnv();
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		throw new Error(
+			"Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY.",
+		);
+	}
 	return new StorageCtx({
 		pool,
 		projectSlug,
@@ -201,10 +207,7 @@ betterbaseRouter.post("/storage/generate-upload-url", zValidator("json", uploadU
 	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
 
 	const { contentType, filename } = c.req.valid("json");
-	const safeContentType =
-		typeof contentType === "string" && ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType)
-			? contentType
-			: null;
+	const safeContentType = ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType) ? contentType : null;
 	if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
 
 	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
@@ -213,25 +216,28 @@ betterbaseRouter.post("/storage/generate-upload-url", zValidator("json", uploadU
 	}
 
 	let ext = "";
-	try {
-		if (typeof filename === "string") {
-			const trimmed = filename.trim();
-			if (trimmed.includes("/") || trimmed.includes("?")) {
-				return c.json({ error: "Invalid filename" }, 400);
-			}
-			const parsedExt = trimmed.includes(".") ? trimmed.split(".").pop() ?? "" : "";
-			if (parsedExt && !/^[a-zA-Z0-9]{1,16}$/.test(parsedExt)) {
-				return c.json({ error: "Invalid filename extension" }, 400);
-			}
-			ext = parsedExt.toLowerCase();
+	if (typeof filename === "string") {
+		// Original filename is not used in S3 keys; only a sanitized trailing extension is used.
+		const trimmed = filename.trim();
+		if (trimmed.includes("/") || trimmed.includes("?")) {
+			return c.json({ error: "Invalid filename" }, 400);
 		}
-	} catch {
-		return c.json({ error: "Invalid filename" }, 400);
+		const parsedExt = trimmed.includes(".") ? trimmed.split(".").pop() ?? "" : "";
+		if (parsedExt && !/^[a-zA-Z0-9]{1,16}$/.test(parsedExt)) {
+			return c.json({ error: "Invalid filename extension" }, 400);
+		}
+		ext = parsedExt.toLowerCase();
 	}
 
 	const storageId = `st_${nanoid(20)}`;
 	const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
 	const env = validateEnv();
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		return c.json(
+			{ error: "Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY." },
+			500,
+		);
+	}
 
 	const s3 = new S3Client({
 		endpoint: env.STORAGE_ENDPOINT,
@@ -291,6 +297,6 @@ betterbaseRouter.post(
 		if (rows.length === 0) return c.json({ error: "Project not found" }, 404);
 
 		const ticket = createWSTicket(adminPayload.sub, projectSlug);
-		return c.json({ ticket, expiresInMs: 60_000 });
+		return c.json({ ticket, expiresInMs: WS_TICKET_TTL_MS });
 	},
 );

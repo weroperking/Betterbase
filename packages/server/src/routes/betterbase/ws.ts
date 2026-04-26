@@ -5,7 +5,6 @@ import {
 	subscriptionTracker,
 } from "@betterbase/core";
 import { nanoid } from "nanoid";
-import { getPool } from "../../lib/db";
 
 const HEARTBEAT_INTERVAL_MS = 15_000; // ping every 15s
 const HEARTBEAT_TIMEOUT_MS = 30_000; // disconnect after 30s without pong
@@ -25,9 +24,19 @@ interface WSTicket {
 
 const clients = new Map<string, ConnectedClient>();
 const wsTickets = new Map<string, WSTicket>();
-const WS_TICKET_TTL_MS = 60_000;
+export const WS_TICKET_TTL_MS = 60_000;
+
+function pruneExpiredWSTickets() {
+	const now = Date.now();
+	for (const [ticket, meta] of wsTickets.entries()) {
+		if (meta.expiresAt <= now) wsTickets.delete(ticket);
+	}
+}
+
+setInterval(pruneExpiredWSTickets, Math.max(15_000, Math.floor(WS_TICKET_TTL_MS / 2)));
 
 export function createWSTicket(adminUserId: string, projectSlug: string): string {
+	pruneExpiredWSTickets();
 	const ticket = nanoid(32);
 	wsTickets.set(ticket, { adminUserId, projectSlug, expiresAt: Date.now() + WS_TICKET_TTL_MS });
 	return ticket;
@@ -167,12 +176,6 @@ export function getBunServeConfig() {
 				if (projectSlug !== wsTicket.projectSlug) {
 					return new Response("Forbidden", { status: 403 });
 				}
-				const pool = getPool();
-				const { rows } = await pool.query(
-					"SELECT id FROM betterbase_meta.projects WHERE slug = $1 LIMIT 1",
-					[projectSlug],
-				);
-				if (rows.length === 0) return new Response("Project not found", { status: 404 });
 
 				url.searchParams.delete("ticket");
 				const sanitizedReq = new Request(url.toString(), {

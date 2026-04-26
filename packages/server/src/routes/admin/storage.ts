@@ -8,14 +8,19 @@ import {
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { validateEnv } from "../../lib/env";
 
 function getS3Client(): S3Client {
+	const env = validateEnv();
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		throw new Error("Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY.");
+	}
 	return new S3Client({
-		endpoint: process.env.STORAGE_ENDPOINT,
+		endpoint: env.STORAGE_ENDPOINT,
 		region: "us-east-1",
 		credentials: {
-			accessKeyId: process.env.STORAGE_ACCESS_KEY ?? "minioadmin",
-			secretAccessKey: process.env.STORAGE_SECRET_KEY ?? "minioadmin",
+			accessKeyId: env.STORAGE_ACCESS_KEY,
+			secretAccessKey: env.STORAGE_SECRET_KEY,
 		},
 		forcePathStyle: true, // Required for MinIO
 	});

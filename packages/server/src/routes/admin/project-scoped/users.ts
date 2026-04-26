@@ -223,6 +223,7 @@ projectUserRoutes.get("/stats/overview", async (c) => {
 projectUserRoutes.post("/export", async (c) => {
 	const pool = getPool();
 	const project = c.get("project") as { id: string; slug: string };
+	const admin = c.get("adminUser") as { id: string; email: string };
 	const s = schemaName(project);
 
 	const { rows } = await pool.query(
@@ -235,9 +236,31 @@ projectUserRoutes.post("/export", async (c) => {
 		rows
 			.map(
 				(r) =>
-					`${escapeCSVValue(r.id)},${escapeCSVValue(r.name)},${escapeCSVValue(r.email)},${r.email_verified},${escapeCSVValue(r.created_at)},${r.banned}`,
+					[
+						escapeCSVValue(r.id),
+						escapeCSVValue(r.name),
+						escapeCSVValue(r.email),
+						escapeCSVValue(r.email_verified),
+						escapeCSVValue(r.created_at),
+						escapeCSVValue(r.banned),
+					].join(","),
 			)
 			.join("\n");
+
+	writeAuditLog({
+		actorId: admin.id,
+		actorEmail: admin.email,
+		action: "project.user.export",
+		resourceType: "project",
+		resourceId: project.id,
+		resourceName: project.slug,
+		afterData: {
+			exported_count: rows.length,
+			fields: ["id", "name", "email", "email_verified", "created_at", "banned"],
+		},
+		ipAddress: getClientIp(c.req.raw.headers),
+		userAgent: c.req.header("User-Agent") ?? undefined,
+	});
 
 	return new Response(csv, {
 		headers: {

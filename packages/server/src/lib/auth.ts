@@ -12,6 +12,31 @@ const getSecret = () => {
 
 const TOKEN_EXPIRY = "8h";
 const BCRYPT_ROUNDS = 12;
+const NEGATIVE_CACHE_TTL_MS = 60_000;
+const REVOCATION_CACHE_MAX = 10_000;
+
+type RevocationCacheEntry = { revoked: boolean; expiresAtMs: number };
+const revocationCache = new Map<string, RevocationCacheEntry>();
+
+function getCachedRevocation(jti: string): boolean | null {
+	const entry = revocationCache.get(jti);
+	if (!entry) return null;
+	if (entry.expiresAtMs <= Date.now()) {
+		revocationCache.delete(jti);
+		return null;
+	}
+	revocationCache.delete(jti);
+	revocationCache.set(jti, entry);
+	return entry.revoked;
+}
+
+function setCachedRevocation(jti: string, revoked: boolean, expiresAtMs: number) {
+	revocationCache.set(jti, { revoked, expiresAtMs });
+	if (revocationCache.size > REVOCATION_CACHE_MAX) {
+		const oldestKey = revocationCache.keys().next().value;
+		if (oldestKey) revocationCache.delete(oldestKey);
+	}
+}
 
 // --- Password ---
 
@@ -39,7 +64,7 @@ export async function signAdminToken(adminUserId: string): Promise<string> {
 
 export async function verifyAdminToken(
 	token: string,
-): Promise<{ sub: string; jti?: string; exp?: number } | null> {
+): Promise<{ sub: string; jti: string; exp?: number } | null> {
 	let payload: any;
 	try {
 		const env = validateEnv();
@@ -57,18 +82,30 @@ export async function verifyAdminToken(
 	const tokenJti = typeof payload.jti === "string" ? payload.jti : undefined;
 	const tokenExp = typeof payload.exp === "number" ? payload.exp : undefined;
 
-	if (!tokenJti) {
-		console.warn(`[auth] Verified legacy admin token without jti for sub=${payload.sub}`);
-		return { sub: payload.sub as string, exp: tokenExp };
+	if (!tokenJti) return null;
+
+	const cached = getCachedRevocation(tokenJti);
+	if (cached !== null) {
+		if (cached) return null;
+		return { sub: payload.sub as string, jti: tokenJti, exp: tokenExp };
 	}
 
 	try {
 		const pool = getPool();
-		const { rows } = await pool.query(
-			"SELECT 1 FROM betterbase_meta.revoked_admin_tokens WHERE jti = $1 LIMIT 1",
+		const { rows } = await pool.query<{ expires_at: string }>(
+			"SELECT expires_at FROM betterbase_meta.revoked_admin_tokens WHERE jti = $1 LIMIT 1",
 			[tokenJti],
 		);
-		if (rows.length > 0) return null;
+		if (rows.length > 0) {
+			const revokedExpiry = new Date(rows[0].expires_at).getTime();
+			setCachedRevocation(tokenJti, true, Number.isNaN(revokedExpiry) ? Date.now() + NEGATIVE_CACHE_TTL_MS : revokedExpiry);
+			return null;
+		}
+		const negativeTtl = Math.min(
+			tokenExp ? Math.max(tokenExp * 1000 - Date.now(), 5_000) : NEGATIVE_CACHE_TTL_MS,
+			NEGATIVE_CACHE_TTL_MS,
+		);
+		setCachedRevocation(tokenJti, false, Date.now() + negativeTtl);
 		return { sub: payload.sub as string, jti: tokenJti, exp: tokenExp };
 	} catch (error) {
 		console.error(

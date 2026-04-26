@@ -11,6 +11,13 @@ import {
 import { getPool } from "../../lib/db";
 
 export const authRoutes = new Hono();
+const LOGOUT_RATE_LIMIT_WINDOW_MS = 60_000;
+const LOGOUT_RATE_LIMIT_MAX = 20;
+const logoutRateLimits = new Map<string, number[]>();
+
+function getLogoutRateLimitKey(c: any): string {
+	return getClientIp(c.req.raw.headers);
+}
 
 // POST /admin/auth/login
 authRoutes.post(
@@ -65,6 +72,17 @@ authRoutes.get("/me", async (c) => {
 
 // POST /admin/auth/logout
 authRoutes.post("/logout", async (c) => {
+	const key = getLogoutRateLimitKey(c);
+	const now = Date.now();
+	const recent = (logoutRateLimits.get(key) ?? []).filter(
+		(ts) => now - ts < LOGOUT_RATE_LIMIT_WINDOW_MS,
+	);
+	if (recent.length >= LOGOUT_RATE_LIMIT_MAX) {
+		return c.json({ error: "Too many logout attempts" }, 429);
+	}
+	recent.push(now);
+	logoutRateLimits.set(key, recent);
+
 	const token = extractBearerToken(c.req.header("Authorization"));
 	if (!token) return c.json({ success: true });
 
@@ -85,7 +103,7 @@ authRoutes.post("/logout", async (c) => {
 		payload.sub,
 	]);
 	if (rows.length > 0) {
-		await writeAuditLog({
+		writeAuditLog({
 			actorId: rows[0].id,
 			actorEmail: rows[0].email,
 			action: "admin.logout",
