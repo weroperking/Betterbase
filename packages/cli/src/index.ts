@@ -568,16 +568,19 @@ export function createProgram(): Command {
 				const { runApiKeyLogin } = await import("./commands/login");
 				let password = process.env.ADMIN_PASSWORD;
 				if (!password) {
-					const { default: prompts } = await import("prompts");
-					const result = await prompts({
-						type: "password",
-						name: "password",
-						message: "Admin password:",
-						validate: (p: string) => p.length >= 1,
-					});
+					const { default: inquirer } = await import("inquirer");
+					const result = await inquirer.prompt<{ password: string }>([
+						{
+							type: "password",
+							name: "password",
+							message: "Admin password:",
+							mask: "*",
+							validate: (value: string) => value.length >= 1 || "Password is required",
+						},
+					]);
 					password = result.password;
 				}
-				await runApiKeyLogin({ serverUrl: opts.url, email: opts.email, password });
+				await runApiKeyLogin({ serverUrl: opts.url, email: opts.email, password: password ?? "" });
 			} else {
 				await runLoginCommand({ serverUrl: opts.url });
 			}
