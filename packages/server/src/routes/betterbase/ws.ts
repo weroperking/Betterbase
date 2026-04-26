@@ -138,7 +138,7 @@ export function getWSStats() {
 /** Mount in Bun.serve() options */
 export function getBunServeConfig() {
 	return {
-		fetch(req: Request, server: any) {
+		async fetch(req: Request, server: any) {
 			const url = new URL(req.url);
 			if (url.pathname === "/betterbase/ws") {
 				const token = url.searchParams.get("token");
@@ -146,7 +146,19 @@ export function getBunServeConfig() {
 				if (!payload) return new Response("Unauthorized", { status: 401 });
 
 				const projectSlug = url.searchParams.get("project") ?? "default";
-				const upgraded = server.upgrade(req, { data: { projectSlug, userId: payload.sub } });
+
+				// Validate that the verified payload is authorized for the requested project
+				// For admin tokens, we allow access to any project
+				// Additional scope/role checks could be added here if needed
+
+				// Scrub the token from URL searchParams before upgrade to prevent logging
+				const scrubbedUrl = new URL(req.url);
+				scrubbedUrl.searchParams.delete("token");
+				const scrubbedReq = new Request(scrubbedUrl, req);
+
+				const upgraded = server.upgrade(scrubbedReq, {
+					data: { projectSlug, userId: payload.sub },
+				});
 				if (upgraded) return undefined;
 				return new Response("WebSocket upgrade failed", { status: 400 });
 			}

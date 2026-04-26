@@ -2,10 +2,10 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getClientIp, writeAuditLog } from "../../../lib/audit";
+import { escapeCSVValue } from "../../../lib/csv";
 import { getPool } from "../../../lib/db";
 
 export const projectUserRoutes = new Hono();
-const CSV_DANGEROUS_PREFIX = /^[=+\-@\t\r]/;
 
 function schemaName(project: { slug: string }) {
 	return `project_${project.slug}`;
@@ -230,17 +230,12 @@ projectUserRoutes.post("/export", async (c) => {
 	);
 
 	const header = "id,name,email,email_verified,created_at,banned\n";
-	const escapeCsv = (value: unknown) => {
-		const raw = String(value ?? "");
-		const prefixed = CSV_DANGEROUS_PREFIX.test(raw) ? `'${raw}` : raw;
-		return `"${prefixed.replace(/"/g, '""')}"`;
-	};
 	const csv =
 		header +
 		rows
 			.map(
 				(r) =>
-					`${escapeCsv(r.id)},${escapeCsv(r.name)},${escapeCsv(r.email)},${r.email_verified},${escapeCsv(r.created_at)},${r.banned}`,
+					`${escapeCSVValue(r.id)},${escapeCSVValue(r.name)},${escapeCSVValue(r.email)},${r.email_verified},${escapeCSVValue(r.created_at)},${r.banned}`,
 			)
 			.join("\n");
 

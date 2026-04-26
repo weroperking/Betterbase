@@ -72,12 +72,15 @@ authRoutes.post("/logout", async (c) => {
 	if (!payload) return c.json({ success: true });
 
 	const pool = getPool();
-	await pool.query(
-		`INSERT INTO betterbase_meta.revoked_admin_tokens (jti, admin_user_id)
-		 VALUES ($1, $2)
-		 ON CONFLICT (jti) DO NOTHING`,
-		[payload.jti, payload.sub],
-	);
+	// Only revoke if jti is present
+	if (payload.jti && payload.exp) {
+		await pool.query(
+			`INSERT INTO betterbase_meta.revoked_admin_tokens (jti, admin_user_id, expires_at)
+			 VALUES ($1, $2, to_timestamp($3))
+			 ON CONFLICT (jti) DO NOTHING`,
+			[payload.jti, payload.sub, payload.exp],
+		);
+	}
 
 	const { rows } = await pool.query("SELECT id, email FROM betterbase_meta.admin_users WHERE id = $1", [
 		payload.sub,

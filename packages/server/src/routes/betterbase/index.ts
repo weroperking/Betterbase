@@ -5,6 +5,7 @@ import {
 	formatError,
 	lookupFunction,
 } from "@betterbase/core";
+import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -20,7 +21,7 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const betterbaseRouter = new Hono();
-const SAFE_PROJECT_SLUG = /^[a-z][a-z0-9_]{0,62}$/;
+const SAFE_PROJECT_SLUG = /^[a-z][a-z0-9-]{0,62}$/;
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
 	"image/jpeg",
 	"image/png",
@@ -58,7 +59,7 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 	const token = extractBearerToken(c.req.header("Authorization"));
 	const adminPayload = token ? await verifyAdminToken(token) : null;
 	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
-	const authCtx = { userId: adminPayload?.sub ?? null, token };
+	const authCtx = { userId: adminPayload.sub, token };
 
 	// Build DB context
 	const pool = getPool();
@@ -106,12 +107,18 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 // Storage context builder
 function buildStorageCtx(pool: any, projectSlug: string): StorageCtx {
 	const env = validateEnv();
+
+	// Storage endpoint and credentials are required (validated in env.ts)
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		throw new Error("Storage not configured: missing STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, or STORAGE_SECRET_KEY");
+	}
+
 	return new StorageCtx({
 		pool,
 		projectSlug,
-		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
-		accessKey: env.STORAGE_ACCESS_KEY ?? "",
-		secretKey: env.STORAGE_SECRET_KEY ?? "",
+		endpoint: env.STORAGE_ENDPOINT,
+		accessKey: env.STORAGE_ACCESS_KEY,
+		secretKey: env.STORAGE_SECRET_KEY,
 		bucket: env.STORAGE_BUCKET ?? "betterbase",
 		publicBase: env.STORAGE_PUBLIC_BASE,
 	});
@@ -189,60 +196,104 @@ function buildActionCtx(pool: any, dbSchema: string, auth: any, projectSlug: str
 }
 
 // Direct browser upload endpoint: POST /betterbase/storage/generate-upload-url
-betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
-	const token = extractBearerToken(c.req.header("Authorization"));
-	const adminPayload = token ? await verifyAdminToken(token) : null;
-	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
-
-	const { contentType, filename } = await c.req.json();
-	const safeContentType =
-		typeof contentType === "string" && ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType)
-			? contentType
-			: null;
-	if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
-
-	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
-	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
-		return c.json({ error: "Invalid project slug" }, 400);
-	}
-	const storageId = `st_${nanoid(20)}`;
-	const ext = filename?.split(".").pop() ?? "";
-	const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
-	const env = validateEnv();
-
-	const s3 = new S3Client({
-		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
-		region: "us-east-1",
-		credentials: {
-			accessKeyId: env.STORAGE_ACCESS_KEY ?? "",
-			secretAccessKey: env.STORAGE_SECRET_KEY ?? "",
-		},
-		forcePathStyle: true,
-	});
-
-	const uploadUrl = await getSignedUrl(
-		s3,
-		new PutObjectCommand({
-			Bucket: env.STORAGE_BUCKET ?? "betterbase",
-			Key: s3Key,
-			ContentType: safeContentType,
+betterbaseRouter.post(
+	"/storage/generate-upload-url",
+	zValidator(
+		"json",
+		z.object({
+			contentType: z.string(),
+			filename: z.string(),
 		}),
-		{ expiresIn: 300 },
-	);
+	),
+	async (c) => {
+		const token = extractBearerToken(c.req.header("Authorization"));
+		const adminPayload = token ? await verifyAdminToken(token) : null;
+		if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
 
-	// Record the pending upload in the DB so getUrl() works after upload
-	const pool = getPool();
-	await pool.query(
-		`INSERT INTO "project_${projectSlug}"._iac_storage
+		const { contentType, filename } = c.req.valid("json");
+
+		// Validate contentType against allowlist
+		if (!ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType)) {
+			return c.json({ error: "Unsupported content type" }, 400);
+		}
+
+		const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+		if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+			return c.json({ error: "Invalid project slug" }, 400);
+		}
+
+		const storageId = `st_${nanoid(20)}`;
+
+		// Safely extract and validate file extension
+		let ext = "";
+		try {
+			const trimmedFilename = filename.trim();
+			if (!trimmedFilename) {
+				return c.json({ error: "Invalid filename" }, 400);
+			}
+
+			const parts = trimmedFilename.split(".");
+			if (parts.length > 1) {
+				const rawExt = parts[parts.length - 1];
+				// Validate extension: no path separators, no query params, max 16 chars
+				if (
+					rawExt.includes("/") ||
+					rawExt.includes("?") ||
+					rawExt.includes("\\") ||
+					rawExt.length > 16
+				) {
+					ext = ""; // Fall back to no extension
+				} else {
+					ext = rawExt;
+				}
+			}
+		} catch (err) {
+			return c.json({ error: "Invalid filename" }, 400);
+		}
+
+		const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
+
+		// Ensure s3Key has no path separators beyond the expected structure
+		if (s3Key.split("/").length > 2 || s3Key.includes("..")) {
+			return c.json({ error: "Invalid filename" }, 400);
+		}
+
+		const env = validateEnv();
+
+		// Validate storage credentials are configured
+		if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+			return c.json({ error: "Storage not configured" }, 500);
+		}
+
+		const s3 = new S3Client({
+			endpoint: env.STORAGE_ENDPOINT,
+			region: "us-east-1",
+			credentials: {
+				accessKeyId: env.STORAGE_ACCESS_KEY,
+				secretAccessKey: env.STORAGE_SECRET_KEY,
+			},
+			forcePathStyle: true,
+		});
+
+		const uploadUrl = await getSignedUrl(
+			s3,
+			new PutObjectCommand({
+				Bucket: env.STORAGE_BUCKET ?? "betterbase",
+				Key: s3Key,
+				ContentType: contentType,
+			}),
+			{ expiresIn: 300 },
+		);
+
+		// Record the pending upload in the DB so getUrl() works after upload
+		const pool = getPool();
+		await pool.query(
+			`INSERT INTO "project_${projectSlug}"._iac_storage
        (storage_id, s3_key, bucket, content_type) VALUES ($1, $2, $3, $4)
      ON CONFLICT (storage_id) DO NOTHING`,
-		[
-			storageId,
-			s3Key,
-			env.STORAGE_BUCKET ?? "betterbase",
-			safeContentType,
-		],
-	);
+			[storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType],
+		);
 
-	return c.json({ storageId, uploadUrl });
-});
+		return c.json({ storageId, uploadUrl });
+	},
+);

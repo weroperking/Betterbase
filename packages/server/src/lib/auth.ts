@@ -39,27 +39,54 @@ export async function signAdminToken(adminUserId: string): Promise<string> {
 
 export async function verifyAdminToken(
 	token: string,
-): Promise<{ sub: string; jti: string } | null> {
+): Promise<{ sub: string; jti: string | undefined; exp?: number } | null> {
+	// Step 1: Verify JWT signature and payload validity
+	let payload: any;
 	try {
 		const env = validateEnv();
-		const { payload } = await jwtVerify(token, getSecret(), {
+		const verified = await jwtVerify(token, getSecret(), {
 			issuer: env.BETTERBASE_JWT_ISSUER,
 			audience: env.BETTERBASE_JWT_AUDIENCE,
 		});
+		payload = verified.payload;
+
 		if (payload.type !== "admin") return null;
-		if (!payload.sub || !payload.jti) return null;
+		if (!payload.sub) return null;
 
-		const pool = getPool();
-		const { rows } = await pool.query(
-			"SELECT 1 FROM betterbase_meta.revoked_admin_tokens WHERE jti = $1 LIMIT 1",
-			[payload.jti],
-		);
-		if (rows.length > 0) return null;
-
-		return { sub: payload.sub as string, jti: payload.jti as string };
+		// Log warning if jti is missing
+		if (!payload.jti) {
+			console.warn(`[auth] Token missing jti claim (sub=${payload.sub})`);
+		}
 	} catch {
+		// Cryptographic verification failed - invalid token
 		return null;
 	}
+
+	// Step 2: Check revocation list (fail-closed on DB errors)
+	// Skip revocation check if jti is missing
+	if (payload.jti) {
+		try {
+			const pool = getPool();
+			const { rows } = await pool.query(
+				"SELECT 1 FROM betterbase_meta.revoked_admin_tokens WHERE jti = $1 LIMIT 1",
+				[payload.jti],
+			);
+			if (rows.length > 0) return null;
+		} catch (err) {
+			// DB/query error - log and fail closed
+			console.error(
+				`[auth] DB error checking token revocation (jti=${payload.jti}, sub=${payload.sub}):`,
+				err,
+			);
+			return null;
+		}
+	}
+
+	return {
+		sub: payload.sub as string,
+		jti: payload.jti as string | undefined,
+		exp: payload.exp as number | undefined
+	};
 }
 
 // --- Middleware helper: extract + verify token from Authorization header ---

@@ -1,21 +1,6 @@
 import { createHash } from "node:crypto";
 import { EventSchemas, Inngest } from "inngest";
-
-// ─── CSV Escaping Helper ───────────────────────────────────────────────────────
-// Helper to escape CSV values - prevents CSV injection and handles special characters
-const escapeCSVValue = (value: unknown): string => {
-	if (value === null || value === undefined) return "";
-	const str = String(value);
-	// Prefix formula injection characters (=, +, -, @, \t, \r, \n) with single quote
-	if (str.match(/^[=\+\-@\t\r\n]/)) {
-		return `"${str.replace(/"/g, '""')}"`;
-	}
-	// Wrap in quotes if contains comma, quote, or newline
-	if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
-		return `"${str.replace(/"/g, '""')}"`;
-	}
-	return str;
-};
+import { escapeCSVValue } from "./csv";
 
 // Helper to validate schema name - prevents SQL injection
 const validateSchemaName = (slug: string): string => {
@@ -556,6 +541,29 @@ export const pollNotificationRules = inngest.createFunction(
 	},
 );
 
+// ─── Function: Cleanup Expired Revoked Tokens (Cron) ─────────────────────────
+
+export const cleanupExpiredTokens = inngest.createFunction(
+	{
+		id: "cleanup-expired-revoked-tokens",
+		retries: 1,
+	},
+	// Runs every hour
+	{ cron: "0 * * * *" },
+	async ({ step }) => {
+		const deleted = await step.run("delete-expired-tokens", async () => {
+			const { getPool } = await import("./db");
+			const pool = getPool();
+			const { rowCount } = await pool.query(
+				"DELETE FROM betterbase_meta.revoked_admin_tokens WHERE expires_at IS NOT NULL AND expires_at < NOW()",
+			);
+			return rowCount ?? 0;
+		});
+
+		return { deleted };
+	},
+);
+
 // ─── All functions (used in serve() registration) ────────────────────────────
 
 export const allInngestFunctions = [
@@ -563,4 +571,5 @@ export const allInngestFunctions = [
 	evaluateNotificationRule,
 	exportProjectUsers,
 	pollNotificationRules,
+	cleanupExpiredTokens,
 ];

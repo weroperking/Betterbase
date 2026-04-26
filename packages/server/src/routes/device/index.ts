@@ -11,20 +11,43 @@ export const deviceRouter = new Hono();
 const CODE_EXPIRY_MINUTES = 10;
 const DEVICE_CODE_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEVICE_CODE_RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_MAP_MAX_SIZE = 10_000; // Cap map size to prevent unbounded growth
 const deviceCodeRateLimits = new Map<string, number[]>();
 
 // POST /device/code  — CLI calls this to initiate login
 deviceRouter.post("/code", async (c) => {
-	const ip = c.req.header("X-Real-IP") ?? "unknown";
+	// Derive safer client key: prefer X-Real-IP, fallback to connection info
+	// Avoid grouping all header-less requests under literal "unknown"
+	const xRealIp = c.req.header("X-Real-IP");
+	const ip = xRealIp || `fallback-${c.req.raw.headers.get("cf-connecting-ip") || "unknown"}`;
+
 	const now = Date.now();
-	const recent = (deviceCodeRateLimits.get(ip) ?? []).filter(
-		(ts) => now - ts < DEVICE_CODE_RATE_LIMIT_WINDOW_MS,
-	);
+	const timestamps = deviceCodeRateLimits.get(ip) ?? [];
+	const recent = timestamps.filter((ts) => now - ts < DEVICE_CODE_RATE_LIMIT_WINDOW_MS);
+
 	if (recent.length >= DEVICE_CODE_RATE_LIMIT_MAX) {
 		return c.json({ error: "Rate limit exceeded. Try again in a minute." }, 429);
 	}
+
 	recent.push(now);
-	deviceCodeRateLimits.set(ip, recent);
+
+	// Prune entry if empty (cleanup), otherwise update
+	if (recent.length === 0) {
+		deviceCodeRateLimits.delete(ip);
+	} else {
+		deviceCodeRateLimits.set(ip, recent);
+	}
+
+	// Cap the map size to prevent unbounded growth
+	if (deviceCodeRateLimits.size > RATE_LIMIT_MAP_MAX_SIZE) {
+		// Remove oldest entries
+		const entries = Array.from(deviceCodeRateLimits.entries());
+		entries.sort((a, b) => Math.min(...a[1]) - Math.min(...b[1]));
+		const toDelete = entries.slice(0, Math.floor(RATE_LIMIT_MAP_MAX_SIZE * 0.1));
+		for (const [key] of toDelete) {
+			deviceCodeRateLimits.delete(key);
+		}
+	}
 
 	const pool = getPool();
 
