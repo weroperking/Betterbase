@@ -5,6 +5,7 @@ import {
 	subscriptionTracker,
 } from "@betterbase/core";
 import { nanoid } from "nanoid";
+import { verifyAdminToken } from "../../lib/auth";
 
 const HEARTBEAT_INTERVAL_MS = 15_000; // ping every 15s
 const HEARTBEAT_TIMEOUT_MS = 30_000; // disconnect after 30s without pong
@@ -140,8 +141,12 @@ export function getBunServeConfig() {
 		fetch(req: Request, server: any) {
 			const url = new URL(req.url);
 			if (url.pathname === "/betterbase/ws") {
+				const token = url.searchParams.get("token");
+				const payload = token ? await verifyAdminToken(token) : null;
+				if (!payload) return new Response("Unauthorized", { status: 401 });
+
 				const projectSlug = url.searchParams.get("project") ?? "default";
-				const upgraded = server.upgrade(req, { data: { projectSlug } });
+				const upgraded = server.upgrade(req, { data: { projectSlug, userId: payload.sub } });
 				if (upgraded) return undefined;
 				return new Response("WebSocket upgrade failed", { status: 400 });
 			}

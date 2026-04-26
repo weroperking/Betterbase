@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { getClientIp, writeAuditLog } from "../../lib/audit";
 import {
 	extractBearerToken,
 	signAdminToken,
@@ -62,8 +63,37 @@ authRoutes.get("/me", async (c) => {
 	return c.json({ admin: rows[0] });
 });
 
-// POST /admin/auth/logout  (client-side token discard — stateless)
-authRoutes.post("/logout", (c) => c.json({ success: true }));
+// POST /admin/auth/logout
+authRoutes.post("/logout", async (c) => {
+	const token = extractBearerToken(c.req.header("Authorization"));
+	if (!token) return c.json({ success: true });
+
+	const payload = await verifyAdminToken(token);
+	if (!payload) return c.json({ success: true });
+
+	const pool = getPool();
+	await pool.query(
+		`INSERT INTO betterbase_meta.revoked_admin_tokens (jti, admin_user_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT (jti) DO NOTHING`,
+		[payload.jti, payload.sub],
+	);
+
+	const { rows } = await pool.query("SELECT id, email FROM betterbase_meta.admin_users WHERE id = $1", [
+		payload.sub,
+	]);
+	if (rows.length > 0) {
+		await writeAuditLog({
+			actorId: rows[0].id,
+			actorEmail: rows[0].email,
+			action: "admin.logout",
+			ipAddress: getClientIp(c.req.raw.headers),
+			userAgent: c.req.header("User-Agent") ?? undefined,
+		});
+	}
+
+	return c.json({ success: true });
+});
 
 // GET /admin/auth/setup-status — check if admin exists (no body validation)
 authRoutes.get("/setup-status", async (c) => {

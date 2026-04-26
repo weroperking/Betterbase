@@ -9,9 +9,23 @@ import { validateEnv } from "../../lib/env";
 export const deviceRouter = new Hono();
 
 const CODE_EXPIRY_MINUTES = 10;
+const DEVICE_CODE_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEVICE_CODE_RATE_LIMIT_MAX = 5;
+const deviceCodeRateLimits = new Map<string, number[]>();
 
 // POST /device/code  — CLI calls this to initiate login
 deviceRouter.post("/code", async (c) => {
+	const ip = c.req.header("X-Real-IP") ?? "unknown";
+	const now = Date.now();
+	const recent = (deviceCodeRateLimits.get(ip) ?? []).filter(
+		(ts) => now - ts < DEVICE_CODE_RATE_LIMIT_WINDOW_MS,
+	);
+	if (recent.length >= DEVICE_CODE_RATE_LIMIT_MAX) {
+		return c.json({ error: "Rate limit exceeded. Try again in a minute." }, 429);
+	}
+	recent.push(now);
+	deviceCodeRateLimits.set(ip, recent);
+
 	const pool = getPool();
 
 	const deviceCode = nanoid(32);

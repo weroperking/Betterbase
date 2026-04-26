@@ -5,6 +5,7 @@ import { getClientIp, writeAuditLog } from "../../../lib/audit";
 import { getPool } from "../../../lib/db";
 
 export const projectUserRoutes = new Hono();
+const CSV_DANGEROUS_PREFIX = /^[=+\-@\t\r]/;
 
 function schemaName(project: { slug: string }) {
 	return `project_${project.slug}`;
@@ -229,18 +230,25 @@ projectUserRoutes.post("/export", async (c) => {
 	);
 
 	const header = "id,name,email,email_verified,created_at,banned\n";
+	const escapeCsv = (value: unknown) => {
+		const raw = String(value ?? "");
+		const prefixed = CSV_DANGEROUS_PREFIX.test(raw) ? `'${raw}` : raw;
+		return `"${prefixed.replace(/"/g, '""')}"`;
+	};
 	const csv =
 		header +
 		rows
 			.map(
-				(r) => `${r.id},"${r.name}","${r.email}",${r.email_verified},${r.created_at},${r.banned}`,
+				(r) =>
+					`${escapeCsv(r.id)},${escapeCsv(r.name)},${escapeCsv(r.email)},${r.email_verified},${escapeCsv(r.created_at)},${r.banned}`,
 			)
 			.join("\n");
 
 	return new Response(csv, {
 		headers: {
-			"Content-Type": "text/csv",
+			"Content-Type": "text/csv; charset=utf-8",
 			"Content-Disposition": `attachment; filename="users-${project.slug}-${Date.now()}.csv"`,
+			"Content-Security-Policy": "default-src 'none'",
 		},
 	});
 });

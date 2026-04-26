@@ -36,7 +36,7 @@ app.use("*", async (c, next) => {
 
 	const projectId = c.req.header("X-Project-ID") ?? null;
 	const userAgent = c.req.header("User-Agent")?.slice(0, 255) ?? null;
-	const ip = c.req.header("X-Forwarded-For")?.split(",")[0] ?? null;
+	const ip = c.req.header("X-Real-IP") ?? null;
 
 	// Fire-and-forget log insert (don't await, don't fail requests on log error)
 	getPool()

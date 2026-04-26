@@ -71,7 +71,5 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
 
 // Helper: extract IP from Hono context
 export function getClientIp(headers: Headers): string {
-	return (
-		headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? headers.get("x-real-ip") ?? "unknown"
-	);
+	return headers.get("x-real-ip") ?? headers.get("x-forwarded-for")?.split(",").pop()?.trim() ?? "unknown";
 }

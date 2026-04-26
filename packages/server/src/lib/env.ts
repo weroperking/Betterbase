@@ -17,6 +17,8 @@ const EnvSchema = z.object({
 	INNGEST_SIGNING_KEY: z.string().optional(),
 	INNGEST_EVENT_KEY: z.string().optional(),
 	PORT: z.string().default("3000"),
+	BETTERBASE_JWT_ISSUER: z.string().default("betterbase"),
+	BETTERBASE_JWT_AUDIENCE: z.string().default("betterbase-admin"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -51,6 +53,15 @@ export function validateEnv(): Env {
 	// Set default for INNGEST_EVENT_KEY in non-production
 	if (!INNGEST_EVENT_KEY) {
 		result.data.INNGEST_EVENT_KEY = "betterbase-dev-event-key";
+	}
+
+	if (result.data.STORAGE_ENDPOINT) {
+		if (!result.data.STORAGE_ACCESS_KEY || !result.data.STORAGE_SECRET_KEY) {
+			console.error(
+				"[env] STORAGE_ACCESS_KEY and STORAGE_SECRET_KEY are required when STORAGE_ENDPOINT is set",
+			);
+			process.exit(1);
+		}
 	}
 
 	validatedEnv = result.data;

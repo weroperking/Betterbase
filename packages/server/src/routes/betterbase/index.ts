@@ -20,6 +20,15 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const betterbaseRouter = new Hono();
+const SAFE_PROJECT_SLUG = /^[a-z][a-z0-9_]{0,62}$/;
+const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+	"image/gif",
+	"application/pdf",
+	"text/plain",
+]);
 
 // All function calls: POST /betterbase/:kind/*
 betterbaseRouter.post("/:kind/*", async (c) => {
@@ -48,11 +57,15 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 	// Auth context
 	const token = extractBearerToken(c.req.header("Authorization"));
 	const adminPayload = token ? await verifyAdminToken(token) : null;
+	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
 	const authCtx = { userId: adminPayload?.sub ?? null, token };
 
 	// Build DB context
 	const pool = getPool();
 	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+		return c.json({ error: "Invalid project slug" }, 400);
+	}
 	const dbSchema = `project_${projectSlug}`;
 
 	try {
@@ -97,8 +110,8 @@ function buildStorageCtx(pool: any, projectSlug: string): StorageCtx {
 		pool,
 		projectSlug,
 		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
-		accessKey: env.STORAGE_ACCESS_KEY ?? "minioadmin",
-		secretKey: env.STORAGE_SECRET_KEY ?? "minioadmin",
+		accessKey: env.STORAGE_ACCESS_KEY ?? "",
+		secretKey: env.STORAGE_SECRET_KEY ?? "",
 		bucket: env.STORAGE_BUCKET ?? "betterbase",
 		publicBase: env.STORAGE_PUBLIC_BASE,
 	});
@@ -177,8 +190,21 @@ function buildActionCtx(pool: any, dbSchema: string, auth: any, projectSlug: str
 
 // Direct browser upload endpoint: POST /betterbase/storage/generate-upload-url
 betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
+	const token = extractBearerToken(c.req.header("Authorization"));
+	const adminPayload = token ? await verifyAdminToken(token) : null;
+	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
+
 	const { contentType, filename } = await c.req.json();
+	const safeContentType =
+		typeof contentType === "string" && ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType)
+			? contentType
+			: null;
+	if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
+
 	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+		return c.json({ error: "Invalid project slug" }, 400);
+	}
 	const storageId = `st_${nanoid(20)}`;
 	const ext = filename?.split(".").pop() ?? "";
 	const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
@@ -188,8 +214,8 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
 		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
 		region: "us-east-1",
 		credentials: {
-			accessKeyId: env.STORAGE_ACCESS_KEY ?? "minioadmin",
-			secretAccessKey: env.STORAGE_SECRET_KEY ?? "minioadmin",
+			accessKeyId: env.STORAGE_ACCESS_KEY ?? "",
+			secretAccessKey: env.STORAGE_SECRET_KEY ?? "",
 		},
 		forcePathStyle: true,
 	});
@@ -199,7 +225,7 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
 		new PutObjectCommand({
 			Bucket: env.STORAGE_BUCKET ?? "betterbase",
 			Key: s3Key,
-			ContentType: contentType ?? "application/octet-stream",
+			ContentType: safeContentType,
 		}),
 		{ expiresIn: 300 },
 	);
@@ -214,7 +240,7 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
 			storageId,
 			s3Key,
 			env.STORAGE_BUCKET ?? "betterbase",
-			contentType ?? "application/octet-stream",
+			safeContentType,
 		],
 	);
 
