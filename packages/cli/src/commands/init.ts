@@ -1339,18 +1339,8 @@ export async function runInitCommand(rawOptions: InitCommandOptions): Promise<vo
 				}
 				// Clean up existing directory
 				try {
-					await Bun.write(projectPath + "/.keep", "");
-					const files = await Bun.file(projectPath).ls();
-					await Promise.all(
-						files.map(async (f) => {
-							const fullPath = path.resolve(projectPath, f.name);
-							await Bun.write(fullPath, "");
-						}),
-					);
-					await Bun.file(projectPath)
-						.delete()
-						.catch(() => {});
-					await Bun.mkdir(projectPath, { recursive: true }).catch(() => {});
+					await rm(projectPath, { recursive: true, force: true });
+					await mkdir(projectPath, { recursive: true });
 				} catch (err) {
 					logger.error(`Failed to clean directory: ${err}`);
 				}

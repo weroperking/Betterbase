@@ -73,9 +73,14 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
 
 // Helper: extract IP from Hono context
 export function getClientIp(headers: Headers): string {
-	const fromProxy = headers.get("x-real-ip") ?? headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-	if (fromProxy) return fromProxy;
+	const fromForwardedFor = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+	if (fromForwardedFor) return fromForwardedFor;
+
+	const fromRealIp = headers.get("x-real-ip")?.trim();
+	if (fromRealIp) return fromRealIp;
+
 	const ua = headers.get("user-agent") ?? "";
+	if (!ua) return "unknown";
 	const fp = createHash("sha256").update(ua).digest("hex").slice(0, 16);
 	return `ua:${fp}`;
 }
