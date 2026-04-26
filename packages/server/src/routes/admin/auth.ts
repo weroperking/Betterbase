@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { getClientIp, writeAuditLog } from "../../lib/audit";
 import {
 	extractBearerToken,
 	signAdminToken,
@@ -10,6 +11,13 @@ import {
 import { getPool } from "../../lib/db";
 
 export const authRoutes = new Hono();
+const LOGOUT_RATE_LIMIT_WINDOW_MS = 60_000;
+const LOGOUT_RATE_LIMIT_MAX = 20;
+const logoutRateLimits = new Map<string, number[]>();
+
+function getLogoutRateLimitKey(c: any): string {
+	return getClientIp(c.req.raw.headers);
+}
 
 // POST /admin/auth/login
 authRoutes.post(
@@ -62,8 +70,50 @@ authRoutes.get("/me", async (c) => {
 	return c.json({ admin: rows[0] });
 });
 
-// POST /admin/auth/logout  (client-side token discard — stateless)
-authRoutes.post("/logout", (c) => c.json({ success: true }));
+// POST /admin/auth/logout
+authRoutes.post("/logout", async (c) => {
+	const key = getLogoutRateLimitKey(c);
+	const now = Date.now();
+	const recent = (logoutRateLimits.get(key) ?? []).filter(
+		(ts) => now - ts < LOGOUT_RATE_LIMIT_WINDOW_MS,
+	);
+	if (recent.length >= LOGOUT_RATE_LIMIT_MAX) {
+		return c.json({ error: "Too many logout attempts" }, 429);
+	}
+	recent.push(now);
+	logoutRateLimits.set(key, recent);
+
+	const token = extractBearerToken(c.req.header("Authorization"));
+	if (!token) return c.json({ success: true });
+
+	const payload = await verifyAdminToken(token);
+	if (!payload) return c.json({ success: true });
+
+	const pool = getPool();
+	if (payload.jti) {
+		await pool.query(
+			`INSERT INTO betterbase_meta.revoked_admin_tokens (jti, admin_user_id, expires_at)
+			 VALUES ($1, $2, to_timestamp($3))
+			 ON CONFLICT (jti) DO NOTHING`,
+			[payload.jti, payload.sub, payload.exp ?? Math.floor(Date.now() / 1000)],
+		);
+	}
+
+	const { rows } = await pool.query("SELECT id, email FROM betterbase_meta.admin_users WHERE id = $1", [
+		payload.sub,
+	]);
+	if (rows.length > 0) {
+		writeAuditLog({
+			actorId: rows[0].id,
+			actorEmail: rows[0].email,
+			action: "admin.logout",
+			ipAddress: getClientIp(c.req.raw.headers),
+			userAgent: c.req.header("User-Agent") ?? undefined,
+		});
+	}
+
+	return c.json({ success: true });
+});
 
 // GET /admin/auth/setup-status — check if admin exists (no body validation)
 authRoutes.get("/setup-status", async (c) => {

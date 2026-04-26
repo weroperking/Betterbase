@@ -5,6 +5,7 @@ import {
 	formatError,
 	lookupFunction,
 } from "@betterbase/core";
+import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -13,13 +14,22 @@ import { getPool } from "../../lib/db";
 import { validateEnv } from "../../lib/env";
 
 // Import WS handler for stats
-import { getWSStats } from "./ws";
+import { createWSTicket, getWSStats, WS_TICKET_TTL_MS } from "./ws";
 
 // Import S3 utilities
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const betterbaseRouter = new Hono();
+const SAFE_PROJECT_SLUG = /^[a-z][a-z0-9-]{0,62}$/;
+const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+	"image/gif",
+	"application/pdf",
+	"text/plain",
+]);
 
 // All function calls: POST /betterbase/:kind/*
 betterbaseRouter.post("/:kind/*", async (c) => {
@@ -29,6 +39,11 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 
 	const fn = lookupFunction(path);
 	if (!fn) return c.json({ error: `Function not found: ${path}` }, 404);
+
+	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+		return c.json({ error: "Invalid project slug" }, 400);
+	}
 
 	// Parse body
 	let args: unknown;
@@ -48,11 +63,11 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 	// Auth context
 	const token = extractBearerToken(c.req.header("Authorization"));
 	const adminPayload = token ? await verifyAdminToken(token) : null;
-	const authCtx = { userId: adminPayload?.sub ?? null, token };
+	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
+	const authCtx = { userId: adminPayload.sub, token };
 
 	// Build DB context
 	const pool = getPool();
-	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
 	const dbSchema = `project_${projectSlug}`;
 
 	try {
@@ -93,13 +108,18 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 // Storage context builder
 function buildStorageCtx(pool: any, projectSlug: string): StorageCtx {
 	const env = validateEnv();
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		throw new Error(
+			"Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY.",
+		);
+	}
 	return new StorageCtx({
 		pool,
 		projectSlug,
-		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
-		accessKey: env.STORAGE_ACCESS_KEY ?? "minioadmin",
-		secretKey: env.STORAGE_SECRET_KEY ?? "minioadmin",
-		bucket: env.STORAGE_BUCKET ?? "betterbase",
+		endpoint: env.STORAGE_ENDPOINT,
+		accessKey: env.STORAGE_ACCESS_KEY,
+		secretKey: env.STORAGE_SECRET_KEY,
+		bucket: env.STORAGE_BUCKET,
 		publicBase: env.STORAGE_PUBLIC_BASE,
 	});
 }
@@ -176,20 +196,55 @@ function buildActionCtx(pool: any, dbSchema: string, auth: any, projectSlug: str
 }
 
 // Direct browser upload endpoint: POST /betterbase/storage/generate-upload-url
-betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
-	const { contentType, filename } = await c.req.json();
+const uploadUrlSchema = z.object({
+	contentType: z.string().min(1),
+	filename: z.string().min(1).max(255).optional(),
+});
+
+betterbaseRouter.post("/storage/generate-upload-url", zValidator("json", uploadUrlSchema), async (c) => {
+	const token = extractBearerToken(c.req.header("Authorization"));
+	const adminPayload = token ? await verifyAdminToken(token) : null;
+	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
+
+	const { contentType, filename } = c.req.valid("json");
+	const safeContentType = ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType) ? contentType : null;
+	if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
+
 	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+		return c.json({ error: "Invalid project slug" }, 400);
+	}
+
+	let ext = "";
+	if (typeof filename === "string") {
+		// Original filename is not used in S3 keys; only a sanitized trailing extension is used.
+		const trimmed = filename.trim();
+		if (trimmed.includes("/") || trimmed.includes("?")) {
+			return c.json({ error: "Invalid filename" }, 400);
+		}
+		const parsedExt = trimmed.includes(".") ? trimmed.split(".").pop() ?? "" : "";
+		if (parsedExt && !/^[a-zA-Z0-9]{1,16}$/.test(parsedExt)) {
+			return c.json({ error: "Invalid filename extension" }, 400);
+		}
+		ext = parsedExt.toLowerCase();
+	}
+
 	const storageId = `st_${nanoid(20)}`;
-	const ext = filename?.split(".").pop() ?? "";
 	const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
 	const env = validateEnv();
+	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+		return c.json(
+			{ error: "Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY." },
+			500,
+		);
+	}
 
 	const s3 = new S3Client({
-		endpoint: env.STORAGE_ENDPOINT ?? "http://minio:9000",
+		endpoint: env.STORAGE_ENDPOINT,
 		region: "us-east-1",
 		credentials: {
-			accessKeyId: env.STORAGE_ACCESS_KEY ?? "minioadmin",
-			secretAccessKey: env.STORAGE_SECRET_KEY ?? "minioadmin",
+			accessKeyId: env.STORAGE_ACCESS_KEY,
+			secretAccessKey: env.STORAGE_SECRET_KEY,
 		},
 		forcePathStyle: true,
 	});
@@ -197,9 +252,9 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
 	const uploadUrl = await getSignedUrl(
 		s3,
 		new PutObjectCommand({
-			Bucket: env.STORAGE_BUCKET ?? "betterbase",
+			Bucket: env.STORAGE_BUCKET,
 			Key: s3Key,
-			ContentType: contentType ?? "application/octet-stream",
+			ContentType: safeContentType,
 		}),
 		{ expiresIn: 300 },
 	);
@@ -213,10 +268,35 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
 		[
 			storageId,
 			s3Key,
-			env.STORAGE_BUCKET ?? "betterbase",
-			contentType ?? "application/octet-stream",
+			env.STORAGE_BUCKET,
+			safeContentType,
 		],
 	);
 
 	return c.json({ storageId, uploadUrl });
 });
+
+betterbaseRouter.post(
+	"/ws-ticket",
+	zValidator("json", z.object({ projectSlug: z.string().min(1).max(63) })),
+	async (c) => {
+		const token = extractBearerToken(c.req.header("Authorization"));
+		const adminPayload = token ? await verifyAdminToken(token) : null;
+		if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
+
+		const { projectSlug } = c.req.valid("json");
+		if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+			return c.json({ error: "Invalid project slug" }, 400);
+		}
+
+		const pool = getPool();
+		const { rows } = await pool.query(
+			"SELECT id FROM betterbase_meta.projects WHERE slug = $1 LIMIT 1",
+			[projectSlug],
+		);
+		if (rows.length === 0) return c.json({ error: "Project not found" }, 404);
+
+		const ticket = createWSTicket(adminPayload.sub, projectSlug);
+		return c.json({ ticket, expiresInMs: WS_TICKET_TTL_MS });
+	},
+);

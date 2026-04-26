@@ -6,9 +6,9 @@ const EnvSchema = z.object({
 	BETTERBASE_ADMIN_EMAIL: z.string().email().optional(),
 	BETTERBASE_ADMIN_PASSWORD: z.string().min(8).optional(),
 	NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-	STORAGE_ENDPOINT: z.string().optional(),
-	STORAGE_ACCESS_KEY: z.string().optional(),
-	STORAGE_SECRET_KEY: z.string().optional(),
+	STORAGE_ENDPOINT: z.string().min(1).optional(),
+	STORAGE_ACCESS_KEY: z.string().min(1).optional(),
+	STORAGE_SECRET_KEY: z.string().min(1).optional(),
 	STORAGE_BUCKET: z.string().default("betterbase"),
 	STORAGE_PUBLIC_BASE: z.string().url().optional(),
 	CORS_ORIGINS: z.string().default("http://localhost:3000"),
@@ -17,6 +17,8 @@ const EnvSchema = z.object({
 	INNGEST_SIGNING_KEY: z.string().optional(),
 	INNGEST_EVENT_KEY: z.string().optional(),
 	PORT: z.string().default("3000"),
+	BETTERBASE_JWT_ISSUER: z.string().default("betterbase"),
+	BETTERBASE_JWT_AUDIENCE: z.string().default("betterbase-admin"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

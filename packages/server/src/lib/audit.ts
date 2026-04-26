@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import type { Pool } from "pg";
 import { getPool } from "./db";
 
@@ -12,6 +13,7 @@ export type AuditAction =
 	| "project.user.ban"
 	| "project.user.unban"
 	| "project.user.delete"
+	| "project.user.export"
 	| "project.user.import"
 	| "webhook.create"
 	| "webhook.update"
@@ -71,7 +73,9 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
 
 // Helper: extract IP from Hono context
 export function getClientIp(headers: Headers): string {
-	return (
-		headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? headers.get("x-real-ip") ?? "unknown"
-	);
+	const fromProxy = headers.get("x-real-ip") ?? headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+	if (fromProxy) return fromProxy;
+	const ua = headers.get("user-agent") ?? "";
+	const fp = createHash("sha256").update(ua).digest("hex").slice(0, 16);
+	return `ua:${fp}`;
 }

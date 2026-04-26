@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getClientIp, writeAuditLog } from "../../../lib/audit";
+import { escapeCSVValue } from "../../../lib/csv";
 import { getPool } from "../../../lib/db";
 
 export const projectUserRoutes = new Hono();
@@ -222,6 +223,7 @@ projectUserRoutes.get("/stats/overview", async (c) => {
 projectUserRoutes.post("/export", async (c) => {
 	const pool = getPool();
 	const project = c.get("project") as { id: string; slug: string };
+	const admin = c.get("adminUser") as { id: string; email: string };
 	const s = schemaName(project);
 
 	const { rows } = await pool.query(
@@ -233,14 +235,38 @@ projectUserRoutes.post("/export", async (c) => {
 		header +
 		rows
 			.map(
-				(r) => `${r.id},"${r.name}","${r.email}",${r.email_verified},${r.created_at},${r.banned}`,
+				(r) =>
+					[
+						escapeCSVValue(r.id),
+						escapeCSVValue(r.name),
+						escapeCSVValue(r.email),
+						escapeCSVValue(r.email_verified),
+						escapeCSVValue(r.created_at),
+						escapeCSVValue(r.banned),
+					].join(","),
 			)
 			.join("\n");
 
+	writeAuditLog({
+		actorId: admin.id,
+		actorEmail: admin.email,
+		action: "project.user.export",
+		resourceType: "project",
+		resourceId: project.id,
+		resourceName: project.slug,
+		afterData: {
+			exported_count: rows.length,
+			fields: ["id", "name", "email", "email_verified", "created_at", "banned"],
+		},
+		ipAddress: getClientIp(c.req.raw.headers),
+		userAgent: c.req.header("User-Agent") ?? undefined,
+	});
+
 	return new Response(csv, {
 		headers: {
-			"Content-Type": "text/csv",
+			"Content-Type": "text/csv; charset=utf-8",
 			"Content-Disposition": `attachment; filename="users-${project.slug}-${Date.now()}.csv"`,
+			"Content-Security-Policy": "default-src 'none'",
 		},
 	});
 });
