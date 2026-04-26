@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getClientIp, writeAuditLog } from "../../../lib/audit";
+import { escapeCSVValue } from "../../../lib/csv";
 import { getPool } from "../../../lib/db";
 
 export const projectUserRoutes = new Hono();
@@ -233,14 +234,16 @@ projectUserRoutes.post("/export", async (c) => {
 		header +
 		rows
 			.map(
-				(r) => `${r.id},"${r.name}","${r.email}",${r.email_verified},${r.created_at},${r.banned}`,
+				(r) =>
+					`${escapeCSVValue(r.id)},${escapeCSVValue(r.name)},${escapeCSVValue(r.email)},${r.email_verified},${escapeCSVValue(r.created_at)},${r.banned}`,
 			)
 			.join("\n");
 
 	return new Response(csv, {
 		headers: {
-			"Content-Type": "text/csv",
+			"Content-Type": "text/csv; charset=utf-8",
 			"Content-Disposition": `attachment; filename="users-${project.slug}-${Date.now()}.csv"`,
+			"Content-Security-Policy": "default-src 'none'",
 		},
 	});
 });

@@ -5,6 +5,7 @@ import {
 	subscriptionTracker,
 } from "@betterbase/core";
 import { nanoid } from "nanoid";
+import { getPool } from "../../lib/db";
 
 const HEARTBEAT_INTERVAL_MS = 15_000; // ping every 15s
 const HEARTBEAT_TIMEOUT_MS = 30_000; // disconnect after 30s without pong
@@ -16,8 +17,21 @@ interface ConnectedClient {
 	lastPong: number;
 	heartbeatTimer?: ReturnType<typeof setInterval>;
 }
+interface WSTicket {
+	adminUserId: string;
+	projectSlug: string;
+	expiresAt: number;
+}
 
 const clients = new Map<string, ConnectedClient>();
+const wsTickets = new Map<string, WSTicket>();
+const WS_TICKET_TTL_MS = 60_000;
+
+export function createWSTicket(adminUserId: string, projectSlug: string): string {
+	const ticket = nanoid(32);
+	wsTickets.set(ticket, { adminUserId, projectSlug, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+	return ticket;
+}
 
 /** Bun WebSocket handler object — passed to Bun.serve() */
 export const betterbaseWSHandler = {
@@ -137,11 +151,37 @@ export function getWSStats() {
 /** Mount in Bun.serve() options */
 export function getBunServeConfig() {
 	return {
-		fetch(req: Request, server: any) {
+		async fetch(req: Request, server: any) {
 			const url = new URL(req.url);
 			if (url.pathname === "/betterbase/ws") {
+				const ticket = url.searchParams.get("ticket");
+				if (!ticket) return new Response("Unauthorized", { status: 401 });
+				const wsTicket = wsTickets.get(ticket);
+				if (!wsTicket || wsTicket.expiresAt < Date.now()) {
+					wsTickets.delete(ticket);
+					return new Response("Unauthorized", { status: 401 });
+				}
+				wsTickets.delete(ticket);
+
 				const projectSlug = url.searchParams.get("project") ?? "default";
-				const upgraded = server.upgrade(req, { data: { projectSlug } });
+				if (projectSlug !== wsTicket.projectSlug) {
+					return new Response("Forbidden", { status: 403 });
+				}
+				const pool = getPool();
+				const { rows } = await pool.query(
+					"SELECT id FROM betterbase_meta.projects WHERE slug = $1 LIMIT 1",
+					[projectSlug],
+				);
+				if (rows.length === 0) return new Response("Project not found", { status: 404 });
+
+				url.searchParams.delete("ticket");
+				const sanitizedReq = new Request(url.toString(), {
+					method: req.method,
+					headers: req.headers,
+				});
+				const upgraded = server.upgrade(sanitizedReq, {
+					data: { projectSlug, userId: wsTicket.adminUserId },
+				});
 				if (upgraded) return undefined;
 				return new Response("WebSocket upgrade failed", { status: 400 });
 			}

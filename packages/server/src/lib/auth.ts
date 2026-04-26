@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import type { Pool } from "pg";
+import { getPool } from "./db";
 import { validateEnv } from "./env";
 
 const getSecret = () => {
@@ -8,7 +10,7 @@ const getSecret = () => {
 	return new TextEncoder().encode(env.BETTERBASE_JWT_SECRET);
 };
 
-const TOKEN_EXPIRY = "30d";
+const TOKEN_EXPIRY = "8h";
 const BCRYPT_ROUNDS = 12;
 
 // --- Password ---
@@ -24,19 +26,55 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 // --- JWT for admin sessions ---
 
 export async function signAdminToken(adminUserId: string): Promise<string> {
+	const env = validateEnv();
 	return new SignJWT({ sub: adminUserId, type: "admin" })
 		.setProtectedHeader({ alg: "HS256" })
 		.setIssuedAt()
 		.setExpirationTime(TOKEN_EXPIRY)
+		.setIssuer(env.BETTERBASE_JWT_ISSUER)
+		.setAudience(env.BETTERBASE_JWT_AUDIENCE)
+		.setJti(randomUUID())
 		.sign(getSecret());
 }
 
-export async function verifyAdminToken(token: string): Promise<{ sub: string } | null> {
+export async function verifyAdminToken(
+	token: string,
+): Promise<{ sub: string; jti?: string; exp?: number } | null> {
+	let payload: any;
 	try {
-		const { payload } = await jwtVerify(token, getSecret());
+		const env = validateEnv();
+		const verified = await jwtVerify(token, getSecret(), {
+			issuer: env.BETTERBASE_JWT_ISSUER,
+			audience: env.BETTERBASE_JWT_AUDIENCE,
+		});
+		payload = verified.payload;
 		if (payload.type !== "admin") return null;
-		return { sub: payload.sub as string };
+		if (!payload.sub) return null;
 	} catch {
+		return null;
+	}
+
+	const tokenJti = typeof payload.jti === "string" ? payload.jti : undefined;
+	const tokenExp = typeof payload.exp === "number" ? payload.exp : undefined;
+
+	if (!tokenJti) {
+		console.warn(`[auth] Verified legacy admin token without jti for sub=${payload.sub}`);
+		return { sub: payload.sub as string, exp: tokenExp };
+	}
+
+	try {
+		const pool = getPool();
+		const { rows } = await pool.query(
+			"SELECT 1 FROM betterbase_meta.revoked_admin_tokens WHERE jti = $1 LIMIT 1",
+			[tokenJti],
+		);
+		if (rows.length > 0) return null;
+		return { sub: payload.sub as string, jti: tokenJti, exp: tokenExp };
+	} catch (error) {
+		console.error(
+			`[auth] Failed to check token revocation for sub=${payload.sub} jti=${tokenJti}:`,
+			error,
+		);
 		return null;
 	}
 }

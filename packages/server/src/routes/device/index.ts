@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { createHash } from "crypto";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -9,9 +10,43 @@ import { validateEnv } from "../../lib/env";
 export const deviceRouter = new Hono();
 
 const CODE_EXPIRY_MINUTES = 10;
+const DEVICE_CODE_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEVICE_CODE_RATE_LIMIT_MAX = 5;
+const deviceCodeRateLimits = new Map<string, number[]>();
+const DEVICE_CODE_RATE_LIMIT_MAX_KEYS = 10_000;
+
+function getRateLimitKey(c: any): string {
+	const realIp = c.req.header("X-Real-IP")?.trim();
+	if (realIp && /^[a-fA-F0-9:.]+$/.test(realIp)) return `ip:${realIp}`;
+
+	const xff = c.req.header("X-Forwarded-For")?.split(",").pop()?.trim();
+	if (xff && /^[a-fA-F0-9:.]+$/.test(xff)) return `ip:${xff}`;
+
+	const ua = c.req.header("User-Agent") ?? "";
+	const fingerprint = createHash("sha256").update(ua).digest("hex").slice(0, 16);
+	return `fp:${fingerprint}`;
+}
 
 // POST /device/code  — CLI calls this to initiate login
 deviceRouter.post("/code", async (c) => {
+	const key = getRateLimitKey(c);
+	const now = Date.now();
+	const recent = (deviceCodeRateLimits.get(key) ?? []).filter(
+		(ts) => now - ts < DEVICE_CODE_RATE_LIMIT_WINDOW_MS,
+	);
+	if (recent.length === 0) {
+		deviceCodeRateLimits.delete(key);
+	}
+	if (recent.length >= DEVICE_CODE_RATE_LIMIT_MAX) {
+		return c.json({ error: "Rate limit exceeded. Try again in a minute." }, 429);
+	}
+	recent.push(now);
+	deviceCodeRateLimits.set(key, recent);
+	if (deviceCodeRateLimits.size > DEVICE_CODE_RATE_LIMIT_MAX_KEYS) {
+		const oldestKey = deviceCodeRateLimits.keys().next().value;
+		if (oldestKey) deviceCodeRateLimits.delete(oldestKey);
+	}
+
 	const pool = getPool();
 
 	const deviceCode = nanoid(32);
