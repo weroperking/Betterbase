@@ -24,12 +24,19 @@ export default function StorageBucketPage() {
 
 	const { data, isLoading } = useQuery({
 		queryKey: ["storageObjects", bucketName],
-		queryFn: () => api.get<any>(`/admin/storage/${bucketName}`),
+		queryFn: () => api.get<{ objects: { Key: string; Size: number; LastModified?: string; ETag?: string }[] }>(`/admin/storage/buckets/${bucketName}/objects`),
 	});
 
 	if (isLoading) return <PageSkeleton />;
 
 	const objects = data?.objects ?? [];
+
+	const formatSize = (bytes?: number) => {
+		if (bytes == null) return "-";
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	};
 
 	return (
 		<div>
@@ -74,25 +81,23 @@ export default function StorageBucketPage() {
 								<TableRow>
 									<TableHead>Name</TableHead>
 									<TableHead>Size</TableHead>
-									<TableHead>Type</TableHead>
-									<TableHead>Created</TableHead>
+									<TableHead>Last Modified</TableHead>
 									<TableHead className="w-24">Actions</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{objects
-									.filter((o: any) => o.name.includes(search))
-									.map((obj: any) => (
-										<TableRow key={obj.name}>
-											<TableCell className="font-mono">{obj.name}</TableCell>
+									.filter((o) => o.Key.includes(search))
+									.map((obj) => (
+										<TableRow key={obj.Key}>
+											<TableCell className="font-mono">{obj.Key}</TableCell>
 											<TableCell style={{ color: "var(--color-text-secondary)" }}>
-												{obj.size}
+												{formatSize(obj.Size)}
 											</TableCell>
 											<TableCell style={{ color: "var(--color-text-secondary)" }}>
-												{obj.content_type}
-											</TableCell>
-											<TableCell style={{ color: "var(--color-text-secondary)" }}>
-												{obj.created_at ? new Date(obj.created_at).toLocaleDateString() : "-"}
+												{obj.LastModified
+													? new Date(obj.LastModified).toLocaleDateString()
+													: "-"}
 											</TableCell>
 											<TableCell>
 												<div className="flex gap-1">
@@ -106,10 +111,10 @@ export default function StorageBucketPage() {
 											</TableCell>
 										</TableRow>
 									))}
-							</TableBody>
-						</Table>
-					</div>
-				)}
+								</TableBody>
+							</Table>
+						</div>
+					)}
 			</div>
 		</div>
 	);

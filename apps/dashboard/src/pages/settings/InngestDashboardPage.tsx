@@ -2,6 +2,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Table,
 	TableBody,
@@ -10,6 +12,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { api } from "@/lib/api";
 import {
 	type InngestFunction,
 	type InngestRun,
@@ -24,6 +27,8 @@ import {
 	Clock,
 	Loader2,
 	PlayCircle,
+	Save,
+	Settings,
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -62,6 +67,12 @@ export default function InngestDashboardPage() {
 	const queryClient = useQueryClient();
 	const [selectedFunction, setSelectedFunction] = useState<string | null>(null);
 	const [runStatusFilter, setRunStatusFilter] = useState<string>("");
+	const [showConfig, setShowConfig] = useState(false);
+	const [configForm, setConfigForm] = useState({
+		inngest_api_key: "",
+		inngest_env_id: "",
+		inngest_base_url: "",
+	});
 
 	// Connection status
 	const {
@@ -108,6 +119,23 @@ export default function InngestDashboardPage() {
 		onError: (err: any) => toast.error(err.message ?? "Failed to cancel run"),
 	});
 
+	// Save config mutation
+	const saveConfigMutation = useMutation({
+		mutationFn: (data: {
+			inngest_api_key?: string;
+			inngest_env_id?: string;
+			inngest_base_url?: string;
+		}) => api.patch("/admin/instance", data),
+		onSuccess: () => {
+			toast.success("Inngest configuration saved");
+			setShowConfig(false);
+			refetchStatus();
+		},
+		onError: (err: any) => toast.error(err.message ?? "Failed to save configuration"),
+	});
+
+	const isConnected = status?.status === "connected";
+
 	return (
 		<div>
 			<PageHeader title="Inngest Dashboard" description="Monitor and manage background workflows" />
@@ -126,7 +154,7 @@ export default function InngestDashboardPage() {
 					<CardContent>
 						{statusLoading ? (
 							<Loader2 className="w-5 h-5 animate-spin" />
-						) : status?.status === "connected" ? (
+						) : isConnected ? (
 							<div className="flex items-center gap-4">
 								<CheckCircle className="w-5 h-5 text-green-500" />
 								<span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
@@ -134,14 +162,93 @@ export default function InngestDashboardPage() {
 								</span>
 							</div>
 						) : (
-							<div className="flex items-center gap-4">
-								<XCircle className="w-5 h-5 text-red-500" />
-								<span className="text-sm text-red-500" style={{ color: "var(--color-danger)" }}>
-									{status?.error ?? "Unable to connect to Inngest"}
-								</span>
-								<Button variant="outline" size="sm" onClick={() => refetchStatus()}>
-									Retry
-								</Button>
+							<div className="space-y-4">
+								<div className="flex items-center gap-4">
+									<XCircle className="w-5 h-5 text-red-500" />
+									<span className="text-sm text-red-500" style={{ color: "var(--color-danger)" }}>
+										{status?.error ?? "Unable to connect to Inngest"}
+									</span>
+									<Button variant="outline" size="sm" onClick={() => refetchStatus()}>
+										Retry
+									</Button>
+								</div>
+								{!showConfig && (
+									<Button variant="ghost" size="sm" onClick={() => setShowConfig(true)}>
+										<Settings size={14} className="mr-1.5" />
+										Configure Connection
+									</Button>
+								)}
+								{showConfig && (
+									<div
+										className="rounded-lg p-4 space-y-3"
+										style={{
+											background: "var(--color-surface-elevated)",
+											border: "1px solid var(--color-border)",
+										}}
+									>
+										<div className="grid gap-2">
+											<Label>API Key</Label>
+											<Input
+												placeholder="Inngest API key"
+												value={configForm.inngest_api_key}
+												onChange={(e) =>
+													setConfigForm((f) => ({ ...f, inngest_api_key: e.target.value }))
+												}
+											/>
+										</div>
+										<div className="grid gap-2">
+											<Label>Environment ID (optional)</Label>
+											<Input
+												placeholder="e.g., production"
+												value={configForm.inngest_env_id}
+												onChange={(e) =>
+													setConfigForm((f) => ({ ...f, inngest_env_id: e.target.value }))
+												}
+											/>
+										</div>
+										<div className="grid gap-2">
+											<Label>Base URL (optional)</Label>
+											<Input
+												placeholder="https://api.inngest.com or http://localhost:8288"
+												value={configForm.inngest_base_url}
+												onChange={(e) =>
+													setConfigForm((f) => ({ ...f, inngest_base_url: e.target.value }))
+												}
+											/>
+											<p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+												Leave empty for Inngest Cloud. Use http://localhost:8288 for local dev
+												server.
+											</p>
+										</div>
+										<div className="flex gap-2 pt-1">
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => setShowConfig(false)}
+											>
+												Cancel
+											</Button>
+											<Button
+												size="sm"
+												onClick={() =>
+													saveConfigMutation.mutate({
+														inngest_api_key: configForm.inngest_api_key || undefined,
+														inngest_env_id: configForm.inngest_env_id || undefined,
+														inngest_base_url: configForm.inngest_base_url || undefined,
+													})
+												}
+												disabled={saveConfigMutation.isPending}
+											>
+												{saveConfigMutation.isPending ? (
+													<Loader2 className="animate-spin mr-1.5" size={14} />
+												) : (
+													<Save size={14} className="mr-1.5" />
+												)}
+												Save
+											</Button>
+										</div>
+									</div>
+								)}
 							</div>
 						)}
 					</CardContent>
