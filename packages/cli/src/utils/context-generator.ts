@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as logger from "./logger";
 import { type RouteInfo, RouteScanner } from "./route-scanner";
-import { SchemaScanner, type TableInfo } from "./schema-scanner";
+import { SchemaScanner, type TableInfo } from "./scanner";
 
 export interface BetterBaseContext {
 	version: string;

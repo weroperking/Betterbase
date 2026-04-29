@@ -70,7 +70,7 @@ export const comments = sqliteTable('comments', {
 			);
 
 			// Import the SchemaScanner to get available tables
-			const { SchemaScanner } = await import("../src/utils/schema-scanner");
+			const { SchemaScanner } = await import("../src/utils/scanner");
 			const schemaPath = path.join(testDir, "src/db/schema.ts");
 			const scanner = new SchemaScanner(schemaPath);
 			const tables = scanner.scan();

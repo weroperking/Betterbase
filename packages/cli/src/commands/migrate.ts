@@ -19,6 +19,7 @@ import {
 const migrateOptionsSchema = z.object({
 	preview: z.boolean().optional(),
 	production: z.boolean().optional(),
+	projectRoot: z.string().optional(),
 });
 
 export type MigrateCommandOptions = z.infer<typeof migrateOptionsSchema>;
@@ -52,16 +53,84 @@ interface MigrationBackup {
 const DRIZZLE_DIR = "drizzle";
 const DRIZZLE_TIMEOUT_MS = 30_000;
 
+export async function runMigrateCommand(rawOptions: MigrateCommandOptions): Promise<void> {
+	const startTime = Date.now();
+	const options = migrateOptionsSchema.parse(rawOptions);
+	const projectRoot = options.projectRoot ?? process.cwd();
+
+	const changes = await withSpinner(
+		"Generating migration files...",
+		async () => await collectChangesFromGenerate(projectRoot),
+		{ successText: "Migration files generated" },
+	);
+	displayDiff(changes);
+
+	if (options.preview) {
+		logger.info("Preview mode enabled. No migrations applied.");
+		return;
+	}
+
+	if (options.production) {
+		const proceed = await prompts.confirm({
+			message: "Apply migrations to production now?",
+			initial: false,
+		});
+		if (!proceed) {
+			logger.warn("Migration cancelled by user.");
+			return;
+		}
+	}
+
+	let backup: MigrationBackup | null = null;
+	if (changes.some((change) => change.isDestructive)) {
+		backup = await backupDatabase(projectRoot);
+		const confirmed = await confirmDestructive(changes);
+		if (!confirmed) return;
+	}
+
+	logger.info("drizzle/ files are for preview; running push will apply changes.");
+	const push = await withSpinner(
+		"Applying migration changes...",
+		async () => await runDrizzleKit(["push"], projectRoot),
+		{ successText: "Applied migration changes" },
+	);
+
+	if (!push.success) {
+		await restoreBackup(backup);
+
+		if (/\b(?:connect(?:ion)?|econnrefused|econnreset|enotfound|etimedout)\b/i.test(push.stderr)) {
+			throw new Error(`Database connection failed while applying migration.\n${push.stderr}`);
+		}
+
+		if (/conflict|merge/i.test(push.stderr)) {
+			throw new Error(
+				`Migration conflict detected during push. Please resolve and retry.\n${push.stderr}`,
+			);
+		}
+
+		throw new Error(`Migration push failed.\n${push.stderr || push.stdout}`);
+	}
+
+	logger.done(startTime, "Migration complete");
+
+	logger.info("Regenerating GraphQL schema...");
+	try {
+		await runGenerateGraphqlCommand(projectRoot);
+	} catch (err) {
+		logger.warn(`Failed to regenerate GraphQL: ${(err as Error).message}`);
+	}
+}
+
 function captureIdentifier(match: RegExpMatchArray, startIndex: number): string {
 	return match[startIndex] ?? match[startIndex + 1] ?? match[startIndex + 2] ?? "";
 }
 
-async function runDrizzleKit(args: string[]): Promise<DrizzleResult> {
+async function runDrizzleKit(args: string[], cwd: string = process.cwd()): Promise<DrizzleResult> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), DRIZZLE_TIMEOUT_MS);
 
 	const proc = Bun.spawn(["bunx", "drizzle-kit", ...args], {
-		cwd: process.cwd(),
+		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
 		signal: controller.signal,
@@ -86,9 +155,9 @@ async function runDrizzleKit(args: string[]): Promise<DrizzleResult> {
 	}
 }
 
-async function listSqlFiles(baseDir: string): Promise<Map<string, string>> {
+async function listSqlFiles(baseDir: string, cwd: string = process.cwd()): Promise<Map<string, string>> {
 	const entries = new Map<string, string>();
-	const root = path.join(process.cwd(), baseDir);
+	const root = path.join(cwd, baseDir);
 
 	const walk = async (dir: string): Promise<void> => {
 		try {
@@ -206,10 +275,10 @@ export function analyzeMigration(sqlStatements: string[]): MigrationChange[] {
 }
 
 function displayDiff(changes: MigrationChange[]): void {
-	console.log("\n📊 Migration Preview\n");
+	logger.section("Migration Preview");
 
 	if (changes.length === 0) {
-		console.log(chalk.gray("No schema changes detected."));
+		logger.dim("No schema changes detected.");
 		return;
 	}
 
@@ -219,38 +288,38 @@ function displayDiff(changes: MigrationChange[]): void {
 	const destructive = changes.filter((c) => c.isDestructive);
 
 	if (newTables.length) {
-		console.log(chalk.green("✅ New Tables:"));
+		console.log(chalk.green.bold("New Tables:"));
 		for (const change of newTables) {
 			console.log(chalk.green(`  + ${change.table}`));
 		}
-		console.log("");
+		logger.blank();
 	}
 
 	if (newColumns.length) {
-		console.log(chalk.green("✅ New Columns:"));
+		console.log(chalk.green.bold("New Columns:"));
 		for (const change of newColumns) {
 			console.log(chalk.green(`  + ${change.table}.${change.column ?? ""}`));
 		}
-		console.log("");
+		logger.blank();
 	}
 
 	if (modified.length) {
-		console.log(chalk.yellow("⚠️  Modified Columns:"));
+		console.log(chalk.yellow.bold("Modified Columns:"));
 		for (const change of modified) {
-			console.log(chalk.yellow(`  ! ${change.table}.${change.column ?? ""}`));
+			console.log(chalk.yellow(`  ~ ${change.table}.${change.column ?? ""}`));
 		}
-		console.log("");
+		logger.blank();
 	}
 
 	if (destructive.length) {
-		console.log(chalk.red("❌ Destructive Changes:"));
+		console.log(chalk.red.bold("Destructive Changes:"));
 		for (const change of destructive) {
 			console.log(
 				chalk.red(`  - ${change.type}: ${change.table}${change.column ? `.${change.column}` : ""}`),
 			);
-			console.log(chalk.red("    ⚠️  This will DELETE DATA"));
+			console.log(chalk.red(`    ${logger.sym.warn} This will DELETE DATA`));
 		}
-		console.log("");
+		logger.blank();
 	}
 }
 
@@ -278,7 +347,7 @@ async function confirmDestructive(changes: MigrationChange[]): Promise<boolean> 
 	return true;
 }
 
-async function backupDatabase(): Promise<MigrationBackup | null> {
+async function backupDatabase(projectRoot: string = process.cwd()): Promise<MigrationBackup | null> {
 	const sourcePath = process.env.DB_PATH ?? DEFAULT_DB_PATH;
 
 	try {
@@ -289,7 +358,7 @@ async function backupDatabase(): Promise<MigrationBackup | null> {
 	}
 
 	const timestamp = new Date().toISOString().replace(/:/g, "-");
-	const backupDir = path.join(process.cwd(), "backups");
+	const backupDir = path.join(projectRoot, "backups");
 	await mkdir(backupDir, { recursive: true });
 
 	const backupPath = path.join(backupDir, `db-${timestamp}.sqlite`);
@@ -410,9 +479,9 @@ export function splitStatements(sql: string): string[] {
 	return statements;
 }
 
-async function collectChangesFromGenerate(): Promise<MigrationChange[]> {
-	const before = await listSqlFiles(DRIZZLE_DIR);
-	const generate = await runDrizzleKit(["generate"]);
+async function collectChangesFromGenerate(projectRoot: string): Promise<MigrationChange[]> {
+	const before = await listSqlFiles(DRIZZLE_DIR, projectRoot);
+	const generate = await runDrizzleKit(["generate"], projectRoot);
 
 	if (!generate.success) {
 		if (/conflict|merge/i.test(generate.stderr)) {
@@ -424,7 +493,7 @@ async function collectChangesFromGenerate(): Promise<MigrationChange[]> {
 		throw new Error(`Failed to generate migrations.\n${generate.stderr || generate.stdout}`);
 	}
 
-	const after = await listSqlFiles(DRIZZLE_DIR);
+	const after = await listSqlFiles(DRIZZLE_DIR, projectRoot);
 	const changedSql: string[] = [];
 
 	for (const [relativePath, content] of after.entries()) {
@@ -439,80 +508,6 @@ async function collectChangesFromGenerate(): Promise<MigrationChange[]> {
 	return analyzeMigration(changedSql);
 }
 
-export async function runMigrateCommand(rawOptions: MigrateCommandOptions): Promise<void> {
-	const startTime = Date.now();
-	const options = migrateOptionsSchema.parse(rawOptions);
-
-	const changes = await withSpinner(
-		"Generating migration files...",
-		async () => await collectChangesFromGenerate(),
-		{ successText: "Migration files generated" },
-	);
-	displayDiff(changes);
-
-	if (options.preview) {
-		logger.info("Preview mode enabled. No migrations applied.");
-		return;
-	}
-
-	if (options.production) {
-		const proceed = await prompts.confirm({
-			message: "Apply migrations to production now?",
-			initial: false,
-		});
-		if (!proceed) {
-			logger.warn("Migration cancelled by user.");
-			return;
-		}
-	}
-
-	let backup: MigrationBackup | null = null;
-	if (changes.some((change) => change.isDestructive)) {
-		backup = await backupDatabase();
-		const confirmed = await confirmDestructive(changes);
-		if (!confirmed) return;
-	}
-
-	logger.info("drizzle/ files are for preview; running push will apply changes.");
-	const push = await withSpinner(
-		"Applying migration changes...",
-		async () => await runDrizzleKit(["push"]),
-		{ successText: "Applied migration changes" },
-	);
-
-	if (!push.success) {
-		await restoreBackup(backup);
-
-		if (/\b(?:connect(?:ion)?|econnrefused|econnreset|enotfound|etimedout)\b/i.test(push.stderr)) {
-			throw new Error(`Database connection failed while applying migration.\n${push.stderr}`);
-		}
-
-		if (/conflict|merge/i.test(push.stderr)) {
-			throw new Error(
-				`Migration conflict detected during push. Please resolve and retry.\n${push.stderr}`,
-			);
-		}
-
-		throw new Error(`Migration push failed.\n${push.stderr || push.stdout}`);
-	}
-
-	logger.done(startTime, "Migration complete");
-
-	// Regenerate GraphQL schema after migration
-	// Use the directory where the migration was run (current working directory)
-	logger.info("Regenerating GraphQL schema...");
-	try {
-		const projectRoot = process.cwd();
-		await runGenerateGraphqlCommand(projectRoot);
-	} catch (err) {
-		logger.warn(`Failed to regenerate GraphQL: ${(err as Error).message}`);
-	}
-}
-
-/**
- * Get database connection based on environment
- * Supports both SQLite (local) and PostgreSQL (remote)
- */
 async function getDatabaseConnection(): Promise<Database> {
 	const dbPath = process.env.DB_PATH ?? DEFAULT_DB_PATH;
 
@@ -606,30 +601,21 @@ export async function runMigrateRollbackCommand(
 
 	logger.info(`Rolling back last ${steps} migration(s)...`);
 
-	// Change to project directory
-	const originalCwd = process.cwd();
-	if (projectRoot !== originalCwd) {
-		process.chdir(projectRoot);
-	}
-
 	let db: Database;
 	try {
 		db = await getDatabaseConnection();
 	} catch (err) {
-		logger.error(`Failed to connect to database: ${(err as Error).message}`);
-		process.chdir(originalCwd);
-		process.exit(1);
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`Failed to connect to database: ${message}`);
 	}
 
 	const migrationsDir = path.join(projectRoot, "migrations");
 
-	// Check if migrations directory exists
 	try {
 		await access(migrationsDir);
 	} catch {
 		logger.warn(`Migrations directory not found at ${migrationsDir}`);
 		logger.info("Create a 'migrations' folder with your migration files");
-		process.chdir(originalCwd);
 		return;
 	}
 
@@ -637,18 +623,14 @@ export async function runMigrateRollbackCommand(
 	try {
 		allMigrations = await loadMigrationFiles(migrationsDir);
 	} catch (err) {
-		logger.error(`Failed to load migrations: ${(err as Error).message}`);
-		if (typeof db.close === "function") db.close();
-		process.chdir(originalCwd);
-		process.exit(1);
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`Failed to load migrations: ${message}`);
 	}
 
 	const applied = await getAppliedMigrations(db);
 
 	if (applied.length === 0) {
 		logger.warn("No migrations to rollback");
-		if (typeof db.close === "function") db.close();
-		process.chdir(originalCwd);
 		return;
 	}
 
@@ -662,17 +644,14 @@ export async function runMigrateRollbackCommand(
 		const migration = allMigrations.find((m) => m.name === lastMigration.name);
 
 		if (!migration?.downSql) {
-			logger.error(`Migration ${lastMigration.name} has no down.sql file`);
-			logger.info(`Create ${lastMigration.name}_down.sql to enable rollback`);
-			if (typeof db.close === "function") db.close();
-			process.chdir(originalCwd);
-			process.exit(1);
+			throw new Error(
+				`Migration ${lastMigration.name} has no down.sql file. Create ${lastMigration.name}_down.sql to enable rollback.`,
+			);
 		}
 
 		logger.info(`Rolling back: ${migration.name}`);
 
 		try {
-			// Execute the down SQL
 			const statements = splitStatements(migration.downSql);
 			for (const stmt of statements) {
 				if (stmt.trim()) {
@@ -680,23 +659,17 @@ export async function runMigrateRollbackCommand(
 				}
 			}
 
-			// Remove from tracking table
-			removeMigration(db, migration.name);
+			await removeMigration(db, migration.name);
 
-			logger.success(`✅ Rolled back: ${migration.name}`);
+			logger.success(`Rolled back: ${migration.name}`);
 			rolledBack++;
 		} catch (err) {
-			logger.error(`Failed to rollback: ${(err as Error).message}`);
-			if (typeof db.close === "function") db.close();
-			process.chdir(originalCwd);
-			process.exit(1);
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(`Failed to rollback ${migration.name}: ${message}`);
 		}
 	}
 
-	logger.success(`✅ Rolled back ${rolledBack} migration(s)`);
-
-	if (typeof db.close === "function") db.close();
-	process.chdir(originalCwd);
+	logger.success(`Rolled back ${rolledBack} migration(s)`);
 }
 
 /**
@@ -704,25 +677,15 @@ export async function runMigrateRollbackCommand(
  * Displays all applied migrations
  */
 export async function runMigrateHistoryCommand(projectRoot: string): Promise<void> {
-	// Change to project directory
-	const originalCwd = process.cwd();
-	if (projectRoot !== originalCwd) {
-		process.chdir(projectRoot);
-	}
-
 	let db: Database;
 	try {
 		db = await getDatabaseConnection();
 	} catch (err) {
-		logger.error(`Failed to connect to database: ${(err as Error).message}`);
-		process.chdir(originalCwd);
-		process.exit(1);
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`Failed to connect to database: ${message}`);
 	}
 
 	const applied = await getAppliedMigrations(db);
-
-	if (typeof db.close === "function") db.close();
-	process.chdir(originalCwd);
 
 	if (applied.length === 0) {
 		logger.info("No migrations applied");
