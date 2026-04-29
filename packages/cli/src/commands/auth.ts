@@ -449,7 +449,7 @@ export async function runAuthAddProviderCommand(
 			: `# ${template.displayName} OAuth\n${envVarsToAdd.join("\n")}\n`;
 
 		writeFileSync(envFile, newEnv, "utf-8");
-		logger.success(`✅ Added env vars to .env`);
+		logger.success("\u2705 Added env vars to .env");
 	}
 
 	// Print setup instructions
@@ -459,7 +459,7 @@ export async function runAuthAddProviderCommand(
 		authUrl,
 	);
 
-	console.log("\n" + "=".repeat(60));
+	console.log(`\n${"=".repeat(60)}`);
 	console.log(`${template.displayName} OAuth Setup Instructions:`);
 	console.log(instructions);
 	console.log("=".repeat(60));

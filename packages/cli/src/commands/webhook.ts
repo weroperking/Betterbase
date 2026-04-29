@@ -6,16 +6,14 @@
 
 import { existsSync as fsExistsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { type BetterBaseConfig, parseConfig } from "@betterbase/core/config";
 import { type WebhookDeliveryLog, WebhookDispatcher } from "@betterbase/core/webhooks";
 import type { DBEventType } from "@betterbase/shared";
+import chalk from "chalk";
 import inquirer from "inquirer";
 import * as logger from "../utils/logger";
+import { findConfigFile, loadConfig } from "../utils/config";
 import { SchemaScanner } from "../utils/scanner";
 
-/**
- * Webhook configuration from config file
- */
 interface WebhookEntry {
 	id: string;
 	table: string;
@@ -25,144 +23,11 @@ interface WebhookEntry {
 	enabled: boolean;
 }
 
-/**
- * Find and load the BetterBase config file
- */
-async function findConfigFile(projectRoot: string): Promise<string | null> {
-	const configPaths = [
-		path.join(projectRoot, "betterbase.config.ts"),
-		path.join(projectRoot, "betterbase.config.js"),
-		path.join(projectRoot, "betterbase.config.mts"),
-	];
-
-	for (const configPath of configPaths) {
-		if (fsExistsSync(configPath)) {
-			return configPath;
-		}
-	}
-
-	return null;
-}
-
-/**
- * Load and parse the BetterBase config
- */
-async function loadConfig(projectRoot: string): Promise<BetterBaseConfig | null> {
-	const configPath = await findConfigFile(projectRoot);
-
-	if (!configPath) {
-		logger.error('No betterbase.config.ts found. Run "bb init" first.');
-		return null;
-	}
-
-	try {
-		// Dynamic import for ESM modules
-		const configModule = await import(configPath);
-		const config = configModule.default || configModule;
-
-		if (config && typeof config === "object") {
-			const parseResult = parseConfig(config);
-			if (parseResult.success) {
-				return parseResult.data;
-			}
-			logger.error(`Config validation failed: ${parseResult.error.message}`);
-			return null;
-		}
-
-		return null;
-	} catch (error) {
-		logger.error(
-			`Failed to load config: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		return null;
-	}
-}
-
-/**
- * Find database schema file
- */
-function findSchemaFile(projectRoot: string): string | null {
-	const schemaPaths = [
-		path.join(projectRoot, "src/db/schema.ts"),
-		path.join(projectRoot, "src/database/schema.ts"),
-		path.join(projectRoot, "schema.ts"),
-	];
-
-	for (const schemaPath of schemaPaths) {
-		if (fsExistsSync(schemaPath)) {
-			return schemaPath;
-		}
-	}
-
-	return null;
-}
-
-/**
- * Get list of tables from schema
- */
-function getTablesFromSchema(projectRoot: string): string[] {
-	const schemaPath = findSchemaFile(projectRoot);
-	if (!schemaPath) {
-		return [];
-	}
-
-	try {
-		const scanner = new SchemaScanner(schemaPath);
-		const tables = scanner.scan();
-		return Object.keys(tables);
-	} catch (error) {
-		logger.warn(`Failed to scan schema: ${error instanceof Error ? error.message : String(error)}`);
-		return [];
-	}
-}
-
-/**
- * Read the raw config file content
- */
-async function readConfigFile(
-	projectRoot: string,
-): Promise<{ content: string; path: string } | null> {
-	const configPath = findConfigFile(projectRoot);
-	const resolvedPath = await configPath;
-	if (!resolvedPath) {
-		return null;
-	}
-
-	try {
-		const content = readFileSync(resolvedPath, "utf-8");
-		return { content, path: resolvedPath };
-	} catch (error) {
-		return null;
-	}
-}
-
-/**
- * Write updated config file
- */
-function writeConfigFile(configPath: string, content: string): boolean {
-	try {
-		writeFileSync(configPath, content, "utf-8");
-		return true;
-	} catch (error) {
-		logger.error(
-			`Failed to write config: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		return false;
-	}
-}
-
-/**
- * Generate a unique webhook ID
- */
 function generateWebhookId(): string {
 	return `webhook-${Date.now().toString(36)}`;
 }
 
-/**
- * Run webhook create command
- */
 export async function runWebhookCreateCommand(projectRoot: string): Promise<void> {
-	// Load config to check existing webhooks
 	const config = await loadConfig(projectRoot);
 
 	if (!config) {
@@ -170,7 +35,6 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 		return;
 	}
 
-	// Get tables from schema
 	const tables = getTablesFromSchema(projectRoot);
 
 	if (tables.length === 0) {
@@ -178,10 +42,9 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 		return;
 	}
 
-	// Prompt for table name
 	const tableNameResponse = await inquirer.prompt<{ tableName: string }>([
 		{
-			type: "list" as const,
+			type: "list",
 			name: "tableName",
 			message: "Select the table to trigger webhooks:",
 			choices: tables,
@@ -189,10 +52,9 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 	]);
 	const tableName = tableNameResponse.tableName;
 
-	// Prompt for events
 	const eventsResponse = await inquirer.prompt<{ events: string[] }>([
 		{
-			type: "checkbox" as const,
+			type: "checkbox",
 			name: "events",
 			message: "Select events to trigger webhook:",
 			choices: [
@@ -209,10 +71,9 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 		return;
 	}
 
-	// Prompt for URL env var name
 	const urlEnvResponse = await inquirer.prompt<{ urlEnvVar: string }>([
 		{
-			type: "input" as const,
+			type: "input",
 			name: "urlEnvVar",
 			message: "Enter the environment variable name for the webhook URL:",
 			default: `WEBHOOK_${tableName.toUpperCase()}_URL`,
@@ -229,10 +90,9 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 	]);
 	const urlEnvVar = urlEnvResponse.urlEnvVar;
 
-	// Prompt for secret env var name
 	const secretEnvResponse = await inquirer.prompt<{ secretEnvVar: string }>([
 		{
-			type: "input" as const,
+			type: "input",
 			name: "secretEnvVar",
 			message: "Enter the environment variable name for the webhook secret:",
 			default: "WEBHOOK_SECRET",
@@ -249,7 +109,6 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 	]);
 	const secretEnvVar = secretEnvResponse.secretEnvVar;
 
-	// Generate webhook entry
 	const webhookId = generateWebhookId();
 	const webhookEntry: WebhookEntry = {
 		id: webhookId,
@@ -260,7 +119,6 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 		enabled: true,
 	};
 
-	// Update config file
 	const configFile = await readConfigFile(projectRoot);
 	if (!configFile) {
 		logger.error("Could not read config file.");
@@ -270,42 +128,34 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 	let { content } = configFile;
 	const webhookJson = JSON.stringify(webhookEntry, null, 2);
 
-	// Check if webhooks array exists
 	if (content.includes("webhooks:")) {
-		// Find and update existing webhooks array
 		const webhooksMatch = content.match(/webhooks:\s*\[([^\]]*)\]/s);
 		if (webhooksMatch) {
 			const existingWebhooks = webhooksMatch[1].trim();
 			if (existingWebhooks) {
-				// Add to existing array
 				content = content.replace(
 					/webhooks:\s*\[([^\]]*)\]/s,
 					`webhooks: [${existingWebhooks}\n  ${webhookJson.replace(/\n/g, "\n  ")},`,
 				);
 			} else {
-				// Empty array - just add the entry
 				content = content.replace(/webhooks:\s*\[\s*\]/s, `webhooks: [\n  ${webhookJson}\n]`);
 			}
 		}
 	} else {
-		// Add webhooks section before graphql or at end
 		const graphqlMatch = content.match(/graphql:/);
 		if (graphqlMatch) {
 			content = content.replace(/graphql:/, `webhooks: [\n  ${webhookJson}\n],\n\n  graphql:`);
 		} else {
-			// Add at end before final brace
 			content = content.replace(/}\s*$/, `,\n  webhooks: [\n    ${webhookJson}\n  ]\n}`);
 		}
 	}
 
-	// Write updated config
 	if (!writeConfigFile(configFile.path, content)) {
 		return;
 	}
 
 	logger.success(`Webhook created with ID: ${webhookId}`);
 
-	// Update .env file with placeholder
 	const envPath = path.join(projectRoot, ".env");
 	let envContent = "";
 	if (fsExistsSync(envPath)) {
@@ -326,15 +176,12 @@ export async function runWebhookCreateCommand(projectRoot: string): Promise<void
 		writeFileSync(envPath, envContent, "utf-8");
 	}
 
-	logger.info("\nWebhook created successfully!");
+	logger.info("\nWebhook created!");
 	logger.info("Add your webhook URL to .env:");
 	console.log(`  ${urlEnvVar}=https://your-endpoint.com/webhook`);
 	console.log(`  ${secretEnvVar}=your-secret-here`);
 }
 
-/**
- * Run webhook list command
- */
 export async function runWebhookListCommand(projectRoot: string): Promise<void> {
 	const config = await loadConfig(projectRoot);
 
@@ -349,30 +196,25 @@ export async function runWebhookListCommand(projectRoot: string): Promise<void> 
 		return;
 	}
 
-	// Print webhook table
-	console.log("\n\x1b[1mWebhooks\x1b[0m");
-	console.log("─".repeat(80));
+	logger.section(`Webhooks (${webhooks.length})`);
+	console.log(chalk.dim("─".repeat(80)));
 	console.log(
-		`\x1b[1m${"ID".padEnd(20)} ${"Table".padEnd(15)} ${"Events".padEnd(20)} ${"Status".padEnd(10)}\x1b[0m`,
+		chalk.bold(`${"ID".padEnd(20)} ${"Table".padEnd(15)} ${"Events".padEnd(20)} ${"Status".padEnd(10)}`),
 	);
-	console.log("─".repeat(80));
+	console.log(chalk.dim("─".repeat(80)));
 
 	for (const webhook of webhooks) {
 		const id = webhook.id.substring(0, 18).padEnd(20);
 		const table = webhook.table.padEnd(15);
 		const events = webhook.events.join(", ").padEnd(20);
-		const status = webhook.enabled ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
+		const status = webhook.enabled ? chalk.green("enabled") : chalk.red("disabled");
 
 		console.log(`${id} ${table} ${events} ${status}`);
 	}
 
-	console.log("─".repeat(80));
-	console.log(`\nTotal: ${webhooks.length} webhook(s)\n`);
+	console.log(chalk.dim("─".repeat(80)));
 }
 
-/**
- * Run webhook test command
- */
 export async function runWebhookTestCommand(projectRoot: string, webhookId: string): Promise<void> {
 	const config = await loadConfig(projectRoot);
 
@@ -389,7 +231,6 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 		return;
 	}
 
-	// Extract env var names from process.env references
 	const urlEnvMatch = webhook.url.match(/^process\.env\.(\w+)$/);
 	const secretEnvMatch = webhook.secret.match(/^process\.env\.(\w+)$/);
 
@@ -401,7 +242,6 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 	const urlEnvVar = urlEnvMatch[1];
 	const secretEnvVar = secretEnvMatch[1];
 
-	// Get actual values from process.env
 	const url = process.env[urlEnvVar];
 	const secret = process.env[secretEnvVar];
 
@@ -417,7 +257,6 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 		return;
 	}
 
-	// Create a temporary dispatcher for testing
 	const testWebhookConfig = {
 		...webhook,
 		url,
@@ -438,7 +277,7 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 			logger.success("Webhook test succeeded!");
 			console.log(`  Status: ${result.status_code}`);
 			if (result.response_body) {
-				console.log(`  Response: ${result.response_body.substring(0, 200)}`);
+				console.log(chalk.dim(`  Response: ${result.response_body.substring(0, 200)}`));
 			}
 		} else {
 			logger.error("Webhook test failed!");
@@ -446,10 +285,10 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 				console.log(`  Status: ${result.status_code}`);
 			}
 			if (result.response_body) {
-				console.log(`  Response: ${result.response_body.substring(0, 200)}`);
+				console.log(chalk.dim(`  Response: ${result.response_body.substring(0, 200)}`));
 			}
 			if (result.error) {
-				console.log(`  Error: ${result.error}`);
+				console.log(chalk.dim(`  Error: ${result.error}`));
 			}
 		}
 	} catch (error) {
@@ -457,16 +296,70 @@ export async function runWebhookTestCommand(projectRoot: string, webhookId: stri
 	}
 }
 
-/**
- * Options for webhook logs command
- */
 interface WebhookLogsOptions {
 	limit?: number;
 }
 
-/**
- * Find database path from project
- */
+function findSchemaFile(projectRoot: string): string | null {
+	const schemaPaths = [
+		path.join(projectRoot, "src/db/schema.ts"),
+		path.join(projectRoot, "src/database/schema.ts"),
+		path.join(projectRoot, "schema.ts"),
+	];
+
+	for (const schemaPath of schemaPaths) {
+		if (fsExistsSync(schemaPath)) {
+			return schemaPath;
+		}
+	}
+
+	return null;
+}
+
+function getTablesFromSchema(projectRoot: string): string[] {
+	const schemaPath = findSchemaFile(projectRoot);
+	if (!schemaPath) {
+		return [];
+	}
+
+	try {
+		const scanner = new SchemaScanner(schemaPath);
+		const tables = scanner.scan();
+		return Object.keys(tables);
+	} catch (error) {
+		logger.warn(`Failed to scan schema: ${error instanceof Error ? error.message : String(error)}`);
+		return [];
+	}
+}
+
+async function readConfigFile(
+	projectRoot: string,
+): Promise<{ content: string; path: string } | null> {
+	const configPath = await findConfigFile(projectRoot);
+	if (!configPath) {
+		return null;
+	}
+
+	try {
+		const content = readFileSync(configPath, "utf-8");
+		return { content, path: configPath };
+	} catch {
+		return null;
+	}
+}
+
+function writeConfigFile(configPath: string, content: string): boolean {
+	try {
+		writeFileSync(configPath, content, "utf-8");
+		return true;
+	} catch (error) {
+		logger.error(
+			`Failed to write config: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return false;
+	}
+}
+
 function findDatabasePath(projectRoot: string): string | null {
 	const dbPathVariants = [
 		path.join(projectRoot, ".betterbase", "dev.db"),
@@ -483,9 +376,6 @@ function findDatabasePath(projectRoot: string): string | null {
 	return null;
 }
 
-/**
- * Run webhook logs command
- */
 export async function runWebhookLogsCommand(
 	projectRoot: string,
 	webhookId: string,
@@ -508,33 +398,29 @@ export async function runWebhookLogsCommand(
 
 	const limit = options.limit ?? 50;
 
-	logger.info(`Webhook: ${webhook.id}`);
-	logger.info(`Table: ${webhook.table}`);
-	logger.info(`Events: ${webhook.events.join(", ")}`);
-	logger.info(`Limit: ${limit}`);
+	logger.keyValue("Webhook", webhook.id);
+	logger.keyValue("Table", webhook.table);
+	logger.keyValue("Events", webhook.events.join(", "));
+	logger.keyValue("Limit", String(limit));
+	logger.blank();
 
-	console.log("\n\x1b[1mDelivery Logs\x1b[0m");
-	console.log("─".repeat(80));
+	logger.section("Delivery Logs");
 
-	// Try to find and query the database
 	const dbPath = findDatabasePath(projectRoot);
 
 	if (!dbPath) {
 		logger.info("No local database found.");
 		logger.info("Delivery logs are stored in the project's database.");
-		console.log("\n  To view logs, either:");
-		console.log("  1. Run the dev server and access the API: GET /api/webhooks/:webhookId/deliveries");
-		console.log("  2. Check the dashboard if deployed\n");
-		console.log("─".repeat(80));
+		console.log(chalk.dim("\n  To view logs, either:"));
+		console.log(chalk.dim("  1. Run the dev server and access the API: GET /api/webhooks/:webhookId/deliveries"));
+		console.log(chalk.dim("  2. Check the dashboard if deployed\n"));
 		return;
 	}
 
 	try {
-		// Use Bun's sqlite to query the database directly
 		const { Database } = await import("bun:sqlite");
 		const db = new Database(dbPath, { readonly: true });
 
-		// Try to query the deliveries table
 		interface DeliveryLog {
 			id: string;
 			webhook_id: string;
@@ -550,7 +436,7 @@ export async function runWebhookLogsCommand(
 
 		const result: DeliveryLog[] = db
 			.query(
-				`SELECT 
+				`SELECT
 					id,
 					webhook_id,
 					status,
@@ -571,18 +457,13 @@ export async function runWebhookLogsCommand(
 		db.close();
 
 		if (result.length === 0) {
-			console.log("\n  No delivery logs found for this webhook.\n");
-			console.log("─".repeat(80));
+			logger.info("No delivery logs found for this webhook.");
 			return;
 		}
 
-		// Print table header
-		console.log(
-			`\x1b[1m${"Status".padEnd(10)} ${"Code".padEnd(6)} ${"Attempts".padEnd(10)} ${"Created At".padEnd(24)} ${"Error".padEnd(20)}\x1b[0m`,
-		);
-		console.log("─".repeat(80));
+		console.log(chalk.bold(`${"Status".padEnd(10)} ${"Code".padEnd(6)} ${"Attempts".padEnd(10)} ${"Created At".padEnd(24)} ${"Error".padEnd(20)}`));
+		console.log(chalk.dim("─".repeat(80)));
 
-		// Print each log entry
 		for (const log of result) {
 			const status = log.status.padEnd(10);
 			const code = (log.response_code?.toString() ?? "N/A").padEnd(6);
@@ -592,34 +473,28 @@ export async function runWebhookLogsCommand(
 				: "N/A";
 			const error = log.error ? log.error.substring(0, 20) : "";
 
-			// Color code status
 			const statusColored =
 				log.status === "success"
-					? "\x1b[32m" + status + "\x1b[0m"
+					? chalk.green(status)
 					: log.status === "failed"
-						? "\x1b[31m" + status + "\x1b[0m"
-						: "\x1b[33m" + status + "\x1b[0m";
+						? chalk.red(status)
+						: chalk.yellow(status);
 
 			console.log(`${statusColored} ${code} ${attempts} ${createdAt} ${error}`);
 		}
 
-		console.log("─".repeat(80));
+		console.log(chalk.dim("─".repeat(80)));
 		console.log(`\nTotal: ${result.length} delivery log(s)\n`);
 	} catch (error) {
-		// Table might not exist or other error
 		logger.warn("Could not fetch delivery logs from database.");
 		if (error instanceof Error) {
 			logger.warn(error.message);
 		}
-		console.log("\n  Make sure migrations have been run.");
-		console.log("  Run: bb migrate\n");
-		console.log("─".repeat(80));
+		console.log(chalk.dim("\n  Make sure migrations have been run."));
+		console.log(chalk.dim("  Run: bb migrate\n"));
 	}
 }
 
-/**
- * Execute webhook command with subcommands
- */
 export async function runWebhookCommand(args: string[], projectRoot: string): Promise<void> {
 	const [subcommand, ...remainingArgs] = args;
 
@@ -652,23 +527,21 @@ export async function runWebhookCommand(args: string[], projectRoot: string): Pr
 			break;
 
 		default:
-			console.log(`
-\x1b[1mBetterBase Webhook Commands\x1b[0m
-
-\x1b[1mUsage:\x1b[0m
-  bb webhook <command> [options]
-
-\x1b[1mCommands:\x1b[0m
-  create           Create a new webhook
-  list             List all configured webhooks
-  test <id>        Test a webhook by sending a synthetic payload
-  logs <id>        Show delivery logs for a webhook
-
-\x1b[1mExamples:\x1b[0m
-  bb webhook create
-  bb webhook list
-  bb webhook test webhook-abc123
-  bb webhook logs webhook-abc123
-`);
+			logger.section("BetterBase Webhook Commands");
+			logger.info("Usage:");
+			console.log(chalk.dim("  bb webhook <command> [options]"));
+			logger.blank();
+			logger.info("Commands:");
+			console.log(chalk.dim(`  ${chalk.white("create")}           Create a new webhook`));
+			console.log(chalk.dim(`  ${chalk.white("list")}             List all configured webhooks`));
+			console.log(chalk.dim(`  ${chalk.white("test <id>")}        Test a webhook by sending a synthetic payload`));
+			console.log(chalk.dim(`  ${chalk.white("logs <id>")}        Show delivery logs for a webhook`));
+			logger.blank();
+			logger.info("Examples:");
+			console.log(chalk.dim("  bb webhook create"));
+			console.log(chalk.dim("  bb webhook list"));
+			console.log(chalk.dim("  bb webhook test webhook-abc123"));
+			console.log(chalk.dim("  bb webhook logs webhook-abc123"));
+			break;
 	}
 }
