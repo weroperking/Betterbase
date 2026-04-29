@@ -68,12 +68,27 @@ export async function runLoginCommand(opts: { serverUrl?: string } = {}) {
 		process.exit(1);
 	}
 
+	const fullVerificationUri = `${verificationUri}?code=${userCode}`;
+
 	keyValue("Instance", serverUrl);
 	keyValue("Your code", chalk.bold(chalk.yellow(userCode)));
 	blank();
-	console.log(`  ${chalk.dim("Open:")} ${chalk.cyan(`${verificationUri}?code=${userCode}`)}`);
+	console.log(`  ${chalk.dim("Open:")} ${chalk.cyan(fullVerificationUri)}`);
 	blank();
-	console.log(chalk.dim("  Waiting for browser authorization") + chalk.dim(" (5 min timeout)..."));
+
+	// Try to open the browser automatically
+	try {
+		if (process.platform === "darwin") {
+			await Bun.spawn(["open", fullVerificationUri]);
+		} else if (process.platform === "win32") {
+			await Bun.spawn(["cmd", "/c", "start", fullVerificationUri]);
+		} else {
+			await Bun.spawn(["xdg-open", fullVerificationUri]);
+		}
+		console.log(chalk.dim("  Browser opened. Waiting for authorization..."));
+	} catch {
+		console.log(chalk.dim("  Waiting for browser authorization") + chalk.dim(" (5 min timeout)..."));
+	}
 
 	// Step 2: Poll for token
 	const deadline = Date.now() + POLL_TIMEOUT_MS;

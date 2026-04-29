@@ -31,6 +31,9 @@ instanceRoutes.patch(
 			require_email_verification: z.boolean().optional(),
 			ip_allowlist: z.array(z.string()).optional(),
 			cors_origins: z.array(z.string().url()).optional(),
+			inngest_api_key: z.string().optional(),
+			inngest_env_id: z.string().optional(),
+			inngest_base_url: z.string().url().optional().or(z.literal("")),
 		}),
 	),
 	async (c) => {

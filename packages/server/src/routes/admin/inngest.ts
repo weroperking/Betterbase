@@ -3,8 +3,17 @@ import { getPool } from "../../lib/db";
 
 export const inngestAdminRoutes = new Hono();
 
-const getInngestBaseUrl = (): string => {
-	return process.env.INNGEST_BASE_URL ?? "https://api.inngest.com";
+const getInngestBaseUrl = async (): Promise<string> => {
+	const envUrl = process.env.INNGEST_BASE_URL;
+	if (envUrl) return envUrl;
+
+	const pool = getPool();
+	const { rows } = await pool.query(
+		"SELECT value FROM betterbase_meta.instance_settings WHERE key = 'inngest_base_url'",
+	);
+	const storedValue = rows[0]?.value;
+	const url = typeof storedValue === "string" ? storedValue : (storedValue?.value ?? null);
+	return url || "https://api.inngest.com";
 };
 
 const getInngestHeaders = async (): Promise<HeadersInit> => {
@@ -33,8 +42,8 @@ const getInngestEnv = async (): Promise<string | null> => {
 	return typeof storedValue === "string" ? storedValue : (storedValue?.value ?? null);
 };
 
-const isSelfHosted = (): boolean => {
-	const baseUrl = getInngestBaseUrl();
+const isSelfHosted = async (): Promise<boolean> => {
+	const baseUrl = await getInngestBaseUrl();
 	return baseUrl !== "https://api.inngest.com";
 };
 
@@ -51,9 +60,9 @@ const fetchWithErrorCheck = async (url: string, options?: RequestInit) => {
 // GET /admin/inngest/status — Check Inngest connection status
 inngestAdminRoutes.get("/status", async (c) => {
 	try {
-		const baseUrl = getInngestBaseUrl();
+		const baseUrl = await getInngestBaseUrl();
 
-		if (isSelfHosted()) {
+		if (await isSelfHosted()) {
 			const res = await fetch(`${baseUrl}/health`);
 			const healthy = res.ok;
 
@@ -84,11 +93,11 @@ inngestAdminRoutes.get("/status", async (c) => {
 // GET /admin/inngest/functions — List all registered functions
 inngestAdminRoutes.get("/functions", async (c) => {
 	try {
-		const baseUrl = getInngestBaseUrl();
+		const baseUrl = await getInngestBaseUrl();
 		const headers = await getInngestHeaders();
 		const envId = await getInngestEnv();
 
-		if (isSelfHosted()) {
+		if (await isSelfHosted()) {
 			// Self-hosted Inngest has different API structure
 			// Return local functions from inngest.ts
 			const { allInngestFunctions } = await import("../../lib/inngest");
@@ -121,7 +130,7 @@ inngestAdminRoutes.get("/functions", async (c) => {
 inngestAdminRoutes.get("/functions/:id/runs", async (c) => {
 	try {
 		const functionId = c.req.param("id");
-		const baseUrl = getInngestBaseUrl();
+		const baseUrl = await getInngestBaseUrl();
 		const headers = await getInngestHeaders();
 		const envId = await getInngestEnv();
 
@@ -131,7 +140,7 @@ inngestAdminRoutes.get("/functions/:id/runs", async (c) => {
 		const params = new URLSearchParams({ limit: String(limit) });
 		if (status) params.append("status", status);
 
-		if (isSelfHosted()) {
+		if (await isSelfHosted()) {
 			// Self-hosted: query from database webhook_deliveries by webhook_id
 			// Note: functionId in routes refers to webhook ID for webhook deliveries
 			const pool = getPool();
@@ -174,11 +183,11 @@ inngestAdminRoutes.get("/functions/:id/runs", async (c) => {
 inngestAdminRoutes.get("/runs/:runId", async (c) => {
 	try {
 		const runId = c.req.param("runId");
-		const baseUrl = getInngestBaseUrl();
+		const baseUrl = await getInngestBaseUrl();
 		const headers = await getInngestHeaders();
 		const envId = await getInngestEnv();
 
-		if (isSelfHosted()) {
+		if (await isSelfHosted()) {
 			// Self-hosted: get from database
 			const pool = getPool();
 			const { rows } = await pool.query(
@@ -306,11 +315,11 @@ inngestAdminRoutes.post("/functions/:id/test", async (c) => {
 inngestAdminRoutes.post("/runs/:runId/cancel", async (c) => {
 	try {
 		const runId = c.req.param("runId");
-		const baseUrl = getInngestBaseUrl();
+		const baseUrl = await getInngestBaseUrl();
 		const headers = await getInngestHeaders();
 		const envId = await getInngestEnv();
 
-		if (isSelfHosted()) {
+		if (await isSelfHosted()) {
 			// Self-hosted: cannot cancel (webhooks are synchronous from DB perspective)
 			return c.json(
 				{

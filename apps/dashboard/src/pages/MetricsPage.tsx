@@ -5,9 +5,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { QK } from "@/lib/query-keys";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart2, Clock, FolderOpen, TrendingUp, Users, Zap } from "lucide-react";
+import {
+	AlertTriangle,
+	BarChart2,
+	Clock,
+	FolderOpen,
+	TrendingUp,
+	Users,
+	Zap,
+} from "lucide-react";
 import { useSearchParams } from "react-router";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+	Area,
+	AreaChart,
+	Bar,
+	BarChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
+	Cell,
+} from "recharts";
 
 type Period = "24h" | "7d" | "30d";
 
@@ -62,17 +80,30 @@ export default function MetricsPage() {
 	const ts = timeseries?.timeseries ?? [];
 	const endpoints = topEndpoints?.endpoints ?? [];
 
+	const totalRequests = ts.reduce((sum: number, point: any) => sum + (point.total ?? 0), 0);
+	const totalErrors = ts.reduce((sum: number, point: any) => sum + (point.errors ?? 0), 0);
+	const errorRate = totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : "0.00";
+
 	const setPeriod = (p: Period) => {
 		const newParams = new URLSearchParams(searchParams);
 		newParams.set("period", p);
 		setSearchParams(newParams);
 	};
 
+	const latencyBars = l
+		? [
+				{ label: "P50", value: l.p50, color: "var(--color-success)" },
+				{ label: "P95", value: l.p95, color: "var(--color-warning)" },
+				{ label: "P99", value: l.p99, color: "var(--color-danger)" },
+				{ label: "Avg", value: l.avg, color: "var(--color-brand)" },
+			]
+		: [];
+
 	return (
 		<div>
 			<PageHeader
 				title="Metrics"
-				description="Detailed performance metrics for your Betterbase instance"
+				description="Detailed performance metrics and analytics for your Betterbase instance"
 			/>
 
 			<div className="px-8 pb-8 space-y-6">
@@ -124,117 +155,198 @@ export default function MetricsPage() {
 					/>
 				</div>
 
-				{/* Latency Distribution */}
-				{latencyLoading ? (
-					<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-						{[1, 2, 3, 4].map((i) => (
-							<Skeleton key={i} className="h-20 rounded-xl" />
-						))}
-					</div>
-				) : latencyError ? (
+				{/* Secondary stats */}
+				<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 					<div
-						className="grid grid-cols-2 lg:grid-cols-4 gap-4"
-						style={{
-							background: "var(--color-surface)",
-							border: "1px solid var(--color-border)",
-							borderRadius: "12px",
-							padding: "16px",
-						}}
+						className="rounded-xl p-4 text-center"
+						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
 					>
-						<div className="col-span-4 text-center" style={{ color: "var(--color-danger)" }}>
-							Failed to load latency data
+						<div className="flex items-center justify-center gap-1.5 mb-1">
+							<TrendingUp size={14} style={{ color: "var(--color-text-muted)" }} />
+							<span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+								Requests ({period})
+							</span>
+						</div>
+						<div className="text-2xl font-semibold" style={{ color: "var(--color-text-primary)" }}>
+							{totalRequests.toLocaleString()}
 						</div>
 					</div>
-				) : (
 					<div
-						className="grid grid-cols-2 lg:grid-cols-4 gap-4"
-						style={{
-							background: "var(--color-surface)",
-							border: "1px solid var(--color-border)",
-							borderRadius: "12px",
-							padding: "16px",
-						}}
+						className="rounded-xl p-4 text-center"
+						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
 					>
-						{[
-							{ label: "P50 Latency", value: l?.p50 ?? 0, icon: TrendingUp },
-							{ label: "P95 Latency", value: l?.p95 ?? 0, icon: TrendingUp },
-							{ label: "P99 Latency", value: l?.p99 ?? 0, icon: TrendingUp },
-							{ label: "Avg Latency", value: l?.avg ?? 0, icon: BarChart2 },
-						].map(({ label, value, icon: Icon }) => (
-							<div key={label} className="text-center">
-								<div className="flex items-center justify-center gap-1 mb-1">
-									<Icon size={14} style={{ color: "var(--color-text-muted)" }} />
-									<span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-										{label}
-									</span>
-								</div>
-								<div
-									className="text-2xl font-semibold"
-									style={{ color: "var(--color-text-primary)" }}
-								>
-									{value}ms
-								</div>
-							</div>
-						))}
+						<div className="flex items-center justify-center gap-1.5 mb-1">
+							<AlertTriangle size={14} style={{ color: "var(--color-text-muted)" }} />
+							<span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+								Errors ({period})
+							</span>
+						</div>
+						<div
+							className="text-2xl font-semibold"
+							style={{
+								color: totalErrors > 0 ? "var(--color-danger)" : "var(--color-text-primary)",
+							}}
+						>
+							{totalErrors.toLocaleString()}
+						</div>
 					</div>
-				)}
+					<div
+						className="rounded-xl p-4 text-center"
+						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+					>
+						<div className="flex items-center justify-center gap-1.5 mb-1">
+							<BarChart2 size={14} style={{ color: "var(--color-text-muted)" }} />
+							<span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+								Error Rate
+							</span>
+						</div>
+						<div
+							className="text-2xl font-semibold"
+							style={{
+								color: Number(errorRate) > 1 ? "var(--color-danger)" : "var(--color-text-primary)",
+							}}
+						>
+							{errorRate}%
+						</div>
+					</div>
+					<div
+						className="rounded-xl p-4 text-center"
+						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+					>
+						<div className="flex items-center justify-center gap-1.5 mb-1">
+							<Clock size={14} style={{ color: "var(--color-text-muted)" }} />
+							<span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+								P95 Latency
+							</span>
+						</div>
+						<div className="text-2xl font-semibold" style={{ color: "var(--color-text-primary)" }}>
+							{l?.p95 ?? 0}ms
+						</div>
+					</div>
+				</div>
 
-				{/* Request Trends */}
-				{timeseriesLoading ? (
-					<Skeleton className="h-64 rounded-xl" />
-				) : timeseriesError ? (
-					<div
-						className="rounded-xl p-5"
-						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
-					>
-						<div style={{ color: "var(--color-danger)" }}>Failed to load request trends</div>
-					</div>
-				) : (
-					<div
-						className="rounded-xl p-5"
-						style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
-					>
-						<h2 className="text-sm font-medium mb-4" style={{ color: "var(--color-text-primary)" }}>
-							Request Trends — {period}
-						</h2>
-						<div className="h-64">
-							<ResponsiveContainer width="100%" height="100%">
-								<AreaChart data={ts} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-									<XAxis
-										dataKey="bucket"
-										tickFormatter={(v) => new Date(v).toLocaleTimeString([], { hour: "2-digit" })}
-										stroke="var(--color-text-muted)"
-										fontSize={11}
-									/>
-									<YAxis stroke="var(--color-text-muted)" fontSize={11} />
-									<Tooltip
-										contentStyle={{
-											background: "var(--color-surface)",
-											border: "1px solid var(--color-border)",
-											borderRadius: "6px",
-										}}
-									/>
-									<Area
-										type="monotone"
-										dataKey="total"
-										stroke="var(--color-brand)"
-										fill="var(--color-brand-muted)"
-										strokeWidth={2}
-										name="Total Requests"
-									/>
-									<Area
-										type="monotone"
-										dataKey="errors"
-										stroke="var(--color-danger)"
-										fill="var(--color-danger-muted)"
-										strokeWidth={2}
-										name="Errors"
-									/>
-								</AreaChart>
-							</ResponsiveContainer>
+				{/* Charts row */}
+				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+					{/* Request Trends */}
+					{timeseriesLoading ? (
+						<Skeleton className="h-64 rounded-xl" />
+					) : timeseriesError ? (
+						<div
+							className="rounded-xl p-5"
+							style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+						>
+							<div style={{ color: "var(--color-danger)" }}>Failed to load request trends</div>
 						</div>
-					</div>
-				)}
+					) : (
+						<div
+							className="rounded-xl p-5"
+							style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+						>
+							<h2
+								className="text-sm font-medium mb-4"
+								style={{ color: "var(--color-text-primary)" }}
+							>
+								Request Trends — {period}
+							</h2>
+							<div className="h-64">
+								<ResponsiveContainer width="100%" height="100%">
+									<AreaChart data={ts} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+										<XAxis
+											dataKey="bucket"
+											tickFormatter={(v) =>
+												new Date(v).toLocaleTimeString([], { hour: "2-digit" })
+											}
+											stroke="var(--color-text-muted)"
+											fontSize={11}
+										/>
+										<YAxis stroke="var(--color-text-muted)" fontSize={11} />
+										<Tooltip
+											contentStyle={{
+												background: "var(--color-surface)",
+												border: "1px solid var(--color-border)",
+												borderRadius: "6px",
+											}}
+										/>
+										<Area
+											type="monotone"
+											dataKey="total"
+											stroke="var(--color-brand)"
+											fill="var(--color-brand-muted)"
+											strokeWidth={2}
+											name="Total Requests"
+										/>
+										<Area
+											type="monotone"
+											dataKey="errors"
+											stroke="var(--color-danger)"
+											fill="var(--color-danger-muted)"
+											strokeWidth={2}
+											name="Errors"
+										/>
+									</AreaChart>
+								</ResponsiveContainer>
+							</div>
+						</div>
+					)}
+
+					{/* Latency Distribution */}
+					{latencyLoading ? (
+						<Skeleton className="h-64 rounded-xl" />
+					) : latencyError ? (
+						<div
+							className="rounded-xl p-5"
+							style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+						>
+							<div style={{ color: "var(--color-danger)" }}>Failed to load latency data</div>
+						</div>
+					) : (
+						<div
+							className="rounded-xl p-5"
+							style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+						>
+							<h2
+								className="text-sm font-medium mb-4"
+								style={{ color: "var(--color-text-primary)" }}
+							>
+								Latency Distribution — {period}
+							</h2>
+							<div className="h-64">
+								<ResponsiveContainer width="100%" height="100%">
+									<BarChart data={latencyBars} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+										<XAxis
+											dataKey="label"
+											stroke="var(--color-text-muted)"
+											fontSize={12}
+										/>
+										<YAxis
+											stroke="var(--color-text-muted)"
+											fontSize={11}
+											label={{
+												value: "ms",
+												angle: -90,
+												position: "insideLeft",
+												style: { fill: "var(--color-text-muted)", fontSize: 11 },
+											}}
+										/>
+										<Tooltip
+											contentStyle={{
+												background: "var(--color-surface)",
+												border: "1px solid var(--color-border)",
+												borderRadius: "6px",
+											}}
+											formatter={(value: number) => [`${value}ms`, "Latency"]}
+										/>
+										<Bar dataKey="value" radius={[6, 6, 0, 0]}>
+											{latencyBars.map((entry, index) => (
+												<Cell key={`cell-${index}`} fill={entry.color} />
+											))}
+										</Bar>
+									</BarChart>
+								</ResponsiveContainer>
+							</div>
+						</div>
+					)}
+				</div>
 
 				{/* Top Endpoints Performance */}
 				{topEndpointsLoading ? (
@@ -292,7 +404,10 @@ export default function MetricsPage() {
 												className="border-t"
 												style={{ borderColor: "var(--color-border)" }}
 											>
-												<td className="px-5 py-3" style={{ color: "var(--color-text-muted)" }}>
+												<td
+													className="px-5 py-3"
+													style={{ color: "var(--color-text-muted)" }}
+												>
 													#{i + 1}
 												</td>
 												<td className="px-5 py-3">
