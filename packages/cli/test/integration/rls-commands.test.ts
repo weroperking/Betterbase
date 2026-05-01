@@ -85,7 +85,7 @@ function setupTestProject(files?: Record<string, string>) {
 // runRlsCreate
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("runRlsCreate", () => {
+describe.serial("runRlsCreate", () => {
   it("creates a .policy.ts file with correct template", async () => {
     setupTestProject();
     captured = captureConsole();
@@ -186,7 +186,7 @@ describe("runRlsCreate", () => {
 // runRlsList
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("runRlsList", () => {
+describe.serial("runRlsList", () => {
   it("lists multiple policies", async () => {
     setupTestProject();
     // Create multiple policy files
@@ -282,7 +282,7 @@ describe("runRlsList", () => {
 // runRlsDisable
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("runRlsDisable", () => {
+describe.serial("runRlsDisable", () => {
   it("shows delete instructions when policy exists", async () => {
     setupTestProject();
     const policiesDir = join(projectRoot!, "src", "db", "policies");
@@ -344,7 +344,7 @@ describe("runRlsDisable", () => {
 // runRlsCommand — routing
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("runRlsCommand", () => {
+describe.serial("runRlsCommand", () => {
   it("routes 'create' to runRlsCreate", async () => {
     setupTestProject();
     captured = captureConsole();

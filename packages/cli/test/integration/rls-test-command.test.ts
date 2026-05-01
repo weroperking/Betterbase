@@ -242,22 +242,24 @@ describe("RLS Test Command", () => {
       const proj = createTestProject({});
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(4);
+        for (const stmt of policyStmts) {
+          expect(stmt).toContain("auth.uid() = user_id");
+        }
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(4);
-      for (const stmt of policyStmts) {
-        expect(stmt).toContain("auth.uid() = user_id");
-      }
-
-      proj.cleanup();
-      restoreEnv(env);
     });
 
     it("reads policy files correctly and extracts operations", async () => {
@@ -280,28 +282,30 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(2);
+
+        const selectStmt = policyStmts.find((s) => s.includes("FOR SELECT"));
+        expect(selectStmt).toBeDefined();
+        expect(selectStmt!).toContain("auth.uid() = owner_id");
+
+        const insertStmt = policyStmts.find((s) => s.includes("FOR INSERT"));
+        expect(insertStmt).toBeDefined();
+        expect(insertStmt!).toContain("auth.uid() IS NOT NULL");
+        expect(insertStmt!).toContain("WITH CHECK");
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(2);
-
-      const selectStmt = policyStmts.find((s) => s.includes("FOR SELECT"));
-      expect(selectStmt).toBeDefined();
-      expect(selectStmt!).toContain("auth.uid() = owner_id");
-
-      const insertStmt = policyStmts.find((s) => s.includes("FOR INSERT"));
-      expect(insertStmt).toBeDefined();
-      expect(insertStmt!).toContain("auth.uid() IS NOT NULL");
-      expect(insertStmt!).toContain("WITH CHECK");
-
-      proj.cleanup();
-      restoreEnv(env);
     });
 
     it("returns defaults when no matching .policy.ts files found for table", async () => {

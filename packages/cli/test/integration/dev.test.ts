@@ -134,18 +134,33 @@ const { runDevCommand } = await import("../../src/commands/dev");
 // ═══════════════════════════════════════════════════════════════════════════════════
 describe("runDevCommand", () => {
 	let envBackup: ReturnType<typeof saveEnv>;
+	let baselineSIGINT: Function[];
+	let baselineSIGTERM: Function[];
 
 	beforeEach(() => {
 		resetMockState();
 		envBackup = saveEnv();
 		delete process.env.QUERY_LOG;
 		process.env.NODE_ENV = "test";
+		baselineSIGINT = process.listeners("SIGINT") as Function[];
+		baselineSIGTERM = process.listeners("SIGTERM") as Function[];
 	});
 
 	afterEach(() => {
+		// Remove only handlers added during the test
+		const currentSIGINT = process.listeners("SIGINT") as Function[];
+		const currentSIGTERM = process.listeners("SIGTERM") as Function[];
+		for (const fn of currentSIGINT) {
+			if (!baselineSIGINT.includes(fn)) {
+				process.removeListener("SIGINT", fn);
+			}
+		}
+		for (const fn of currentSIGTERM) {
+			if (!baselineSIGTERM.includes(fn)) {
+				process.removeListener("SIGTERM", fn);
+			}
+		}
 		restoreEnv(envBackup);
-		process.removeAllListeners("SIGINT");
-		process.removeAllListeners("SIGTERM");
 	});
 
 	// 1 ──────────────────────────────────────────────────────────────────────────────

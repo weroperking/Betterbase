@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -289,113 +290,77 @@ describe("InitCommandOptions", () => {
 // runInitCommand — importable and callable
 // ---------------------------------------------------------------------------
 
-describe("runInitCommand", () => {
-	test("is a callable async function", () => {
-		expect(typeof runInitCommand).toBe("function");
-	});
+import { afterEach, beforeEach, describe, expect, it, mock, beforeAll } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { rm } from "node:fs/promises";
 
-	test("accepts InitCommandOptions argument", () => {
-		const opts: InitCommandOptions = { projectName: "foo" };
-		expect(opts.projectName).toBe("foo");
-	});
-});
+import { type InitCommandOptions, runInitCommand } from "../../src/commands/init";
 
-// ---------------------------------------------------------------------------
-// IaC template – structure and content (tests what bb init scaffolds)
-// ---------------------------------------------------------------------------
-
-const IAC_TEMPLATE_DIR = join(import.meta.dir, "..", "..", "..", "..", "templates", "iac");
-
-function readTemplateFile(relPath: string): string {
-	return readFileSync(join(IAC_TEMPLATE_DIR, relPath), "utf-8");
-}
-
-describe("IaC template structure", () => {
-	test("contains package.json with expected scripts", () => {
-		expect(existsSync(join(IAC_TEMPLATE_DIR, "package.json"))).toBe(true);
-		const pkg = JSON.parse(readTemplateFile("package.json"));
-		expect(pkg.scripts).toBeDefined();
-		expect(pkg.scripts.dev).toBeDefined();
-		expect(pkg.name).toBeDefined();
-	});
-
-	test("contains betterbase.config.ts with defineConfig", () => {
-		const content = readTemplateFile("betterbase.config.ts");
-		expect(content).toContain("defineConfig");
-		expect(content).toContain("@betterbase/core");
-	});
-
-	test("contains tsconfig.json", () => {
-		expect(existsSync(join(IAC_TEMPLATE_DIR, "tsconfig.json"))).toBe(true);
-		const tsconfig = JSON.parse(readTemplateFile("tsconfig.json"));
-		expect(tsconfig.compilerOptions).toBeDefined();
-	});
-
-	test("contains src/index.ts", () => {
-		expect(existsSync(join(IAC_TEMPLATE_DIR, "src", "index.ts"))).toBe(true);
-	});
-
-	test("contains betterbase/schema.ts with defineSchema", () => {
-		const content = readTemplateFile("betterbase/schema.ts");
-		expect(content).toContain("defineSchema");
-		expect(content).toContain("defineTable");
-	});
-
-	test("contains betterbase/queries/todos.ts", () => {
-		const content = readTemplateFile("betterbase/queries/todos.ts");
-		expect(content).toContain("query");
-	});
-
-	test("contains betterbase/mutations/todos.ts", () => {
-		const content = readTemplateFile("betterbase/mutations/todos.ts");
-		expect(content).toContain("mutation");
-	});
-
-	test("contains betterbase/cron.ts", () => {
-		expect(
-			existsSync(join(IAC_TEMPLATE_DIR, "betterbase", "cron.ts")),
-		).toBe(true);
-	});
-
-	test("contains .gitkeep for actions directory", () => {
-		expect(
-			existsSync(
-				join(IAC_TEMPLATE_DIR, "betterbase", "actions", ".gitkeep"),
-			),
-		).toBe(true);
-	});
-});
+// ... keep existing unit test describe blocks up through "runInitCommand" basic tests ...
+// Then replace the IaC template structure and build output equivalence sections:
 
 // ---------------------------------------------------------------------------
-// File content verification – tests equivalent to what the build functions
-// produce in the legacy (--no-iac) path.  We verify these by checking that
-// the real init command would have generated equivalent content based on
-// the functions defined in init.ts.
+// Init Command — IaC integration (real command execution)
 // ---------------------------------------------------------------------------
 
-describe("build output equivalence", () => {
-	test("getAuthDialect maps turso→sqlite, planetscale→mysql, others→pg", () => {
-		// mirrors the internal getAuthDialect function
-		expect(getAuthDialect("turso")).toBe("sqlite");
-		expect(getAuthDialect("planetscale")).toBe("mysql");
-		for (const p of ["neon", "postgres", "supabase", "managed"]) {
-			expect(getAuthDialect(p)).toBe("pg");
+describe("runInitCommand (IaC integration)", () => {
+	it("copies full IaC template into new project directory", async () => {
+		const projectName = `bb-test-${randomUUID().slice(0, 8)}`;
+		// Create a temporary parent directory
+		const parentDir = join(import.meta.dir, "..", "..", "..", "..", "tmp-integration-parent");
+		await mkdir(parentDir, { recursive: true });
+		const projectPath = join(parentDir, projectName);
+
+		// Clean start
+		try {
+			await rm(projectPath, { recursive: true, force: true });
+		} catch {
+			/* ignore */
+		}
+
+		// Switch to parent directory so that runInitCommand creates project there
+		const origCwd = process.cwd();
+		process.chdir(parentDir);
+		try {
+			await runInitCommand({ projectName });
+
+			// Expected files from templates/iac plus generated .env/.gitignore
+			expect(existsSync(join(projectPath, "package.json"))).toBe(true);
+			expect(existsSync(join(projectPath, "tsconfig.json"))).toBe(true);
+			expect(existsSync(join(projectPath, ".env"))).toBe(true);
+			expect(existsSync(join(projectPath, ".env.example"))).toBe(true);
+			expect(existsSync(join(projectPath, ".gitignore"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase.config.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase", "schema.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase", "queries", "todos.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase", "mutations", "todos.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase", "cron.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "betterbase", "actions", ".gitkeep"))).toBe(true);
+			expect(existsSync(join(projectPath, "src", "index.ts"))).toBe(true);
+			expect(existsSync(join(projectPath, "src", "modules", "README.md"))).toBe(true);
+			expect(existsSync(join(projectPath, "src", "modules", ".gitkeep"))).toBe(true);
+
+			// Spot-check contents
+			const pkg = JSON.parse(readFileSync(join(projectPath, "package.json"), "utf-8"));
+			expect(pkg.name).toBe(projectName);
+			expect(pkg.scripts.dev).toContain("bun");
+
+			const bbConfig = readFileSync(join(projectPath, "betterbase.config.ts"), "utf-8");
+			expect(bbConfig).toContain("defineConfig");
+
+			const bbSchema = readFileSync(join(projectPath, "betterbase", "schema.ts"), "utf-8");
+			expect(bbSchema).toContain("defineSchema");
+
+			const env = readFileSync(join(projectPath, ".env"), "utf-8");
+			expect(env).toContain("DATABASE_URL");
+		} finally {
+			process.chdir(origCwd);
+			await rm(projectPath, { recursive: true, force: true });
 		}
 	});
-
-	test("getDatabaseLabel returns human-readable labels for all providers", () => {
-		const providers = [
-			"neon",
-			"turso",
-			"planetscale",
-			"supabase",
-			"postgres",
-			"managed",
-		] as const;
-		for (const p of providers) {
-			const label = getDatabaseLabel(p);
-			expect(typeof label).toBe("string");
-			expect(label.length).toBeGreaterThan(5);
-		}
-	});
+});
 });

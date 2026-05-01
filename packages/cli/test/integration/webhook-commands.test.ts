@@ -90,8 +90,9 @@ function createDbDir(root: string, deliveries: DeliverySeed[]): string {
     CREATE TABLE IF NOT EXISTS _betterbase_webhook_deliveries (
       id TEXT PRIMARY KEY,
       webhook_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      request_url TEXT,
+      status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'pending')),
+      request_url TEXT NOT NULL,
+      request_body TEXT,
       response_code INTEGER,
       response_body TEXT,
       error TEXT,
@@ -102,11 +103,11 @@ function createDbDir(root: string, deliveries: DeliverySeed[]): string {
   `);
   const stmt = db.prepare(
     `INSERT INTO _betterbase_webhook_deliveries
-     (id, webhook_id, status, response_code, error, attempt_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     (id, webhook_id, status, request_url, request_body, response_code, response_body, error, attempt_count, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const d of deliveries) {
-    stmt.run(d.id, d.webhook_id, d.status, d.response_code ?? null, d.error ?? null, d.attempt_count ?? 1, d.created_at);
+    stmt.run(d.id, d.webhook_id, d.status, d.request_url ?? "https://example.com/webhook", d.request_body ?? null, d.response_code ?? null, d.response_body ?? null, d.error ?? null, d.attempt_count ?? 1, d.created_at);
   }
   db.close();
   return root;
@@ -115,8 +116,11 @@ function createDbDir(root: string, deliveries: DeliverySeed[]): string {
 interface DeliverySeed {
   id: string;
   webhook_id: string;
-  status: string;
+  status: "success" | "failed" | "pending";
+  request_url?: string;
   response_code?: number;
+  response_body?: string;
+  request_body?: string;
   error?: string;
   attempt_count?: number;
   created_at: string;
@@ -728,47 +732,56 @@ describe("runWebhookCommand routing", () => {
   });
 });
 
-describe("generateWebhookId", () => {
-  it("starts with 'webhook-' prefix", async () => {
-    const { runWebhookCommand } = await import("../../src/commands/webhook");
+describe("generateWebhookId via runWebhookCreateCommand", () => {
+  it("creates a webhook ID with correct prefix and logs it", async () => {
+    const t = createTestProject({
+      "betterbase.config.js": VALID_CONFIG_JS,
+    });
+    captured = captureConsole();
 
-    // Generate multiple IDs and verify format
-    // Call the routing command to trigger the module to be loaded,
-    // then access the unexported function via Date.now pattern verification
-    const now = Date.now();
-    const expectedPrefix = `webhook-${now.toString(36)}`;
+    const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
+    await runWebhookCreateCommand(t.root);
 
-    expect(expectedPrefix).toMatch(/^webhook-[0-9a-z]+$/);
-    expect(expectedPrefix.startsWith("webhook-")).toBe(true);
-    expect(expectedPrefix.length).toBeGreaterThan("webhook-".length);
+    const output = captured.lines.join("\n");
+    // Should contain success message with webhook ID
+    expect(output).toMatch(/Webhook created with ID:\s+webhook-[0-9a-z]+/);
+    expect(output).toContain("Webhook created");
+
+    captured.restore();
+    cleanupProject(t.root);
   });
 
-  it("uses timestamp-based encoding (base36)", async () => {
-    const now1 = Date.now();
-    const id1 = `webhook-${now1.toString(36)}`;
-    const now2 = now1 + 1000;
-    const id2 = `webhook-${now2.toString(36)}`;
+  it("produces unique IDs across calls", async () => {
+    const ids: string[] = [];
 
-    // Both should be valid base36 timestamp strings
-    expect(id1).toMatch(/^webhook-[0-9a-z]+$/);
-    expect(id2).toMatch(/^webhook-[0-9a-z]+$/);
+    for (let i = 0; i < 2; i++) {
+      captured = captureConsole();
+      const t = createTestProject({ "betterbase.config.js": VALID_CONFIG_JS });
+      const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
+      await runWebhookCreateCommand(t.root);
+      const output = captured.lines.join("\n");
+      const match = output.match(/webhook-[0-9a-z]+/);
+      expect(match).not.toBeNull();
+      ids.push(match![0]);
+      captured.restore();
+      cleanupProject(t.root);
+      await new Promise(r => setTimeout(r, 10));
+    }
 
-    // Different timestamps produce different IDs
-    expect(id1).not.toBe(id2);
+    expect(ids[0]).not.toBe(ids[1]);
+    // Later timestamp produces lexicographically greater suffix
+    const suffix0 = ids[0].replace("webhook-", "");
+    const suffix1 = ids[1].replace("webhook-", "");
+    expect(suffix1.localeCompare(suffix0)).toBeGreaterThan(0);
+  });
 
-    // Later timestamp produces a lexicographically greater base36 string
+  it("IDs are monotonically increasing with time", () => {
+    const now = Date.now();
+    const id1 = `webhook-${now.toString(36)}`;
+    const id2 = `webhook-${(now + 100).toString(36)}`;
     const suffix1 = id1.replace("webhook-", "");
     const suffix2 = id2.replace("webhook-", "");
     expect(suffix2.localeCompare(suffix1)).toBeGreaterThan(0);
-  });
-
-  it("produces IDs where base36 component is monotonically increasing", async () => {
-    const timestamps = [Date.now(), Date.now() + 100, Date.now() + 500];
-    const suffixes = timestamps.map((ts) => ts.toString(36));
-
-    // Each suffix should be greater than the previous (based on timestamp)
-    expect(suffixes[1].localeCompare(suffixes[0])).toBeGreaterThan(0);
-    expect(suffixes[2].localeCompare(suffixes[1])).toBeGreaterThan(0);
   });
 });
 
@@ -781,15 +794,17 @@ describe("runWebhookCreateCommand helpers", () => {
 
   it("returns early when config file does not exist", async () => {
     projectRoot = createProject({});
-    const captured = captureConsole();
+    captured = captureConsole();
 
-    // runWebhookCreateCommand uses inquirer prompts, but the first thing
-    // it does is loadConfig. If config is null, it logs an error and returns.
     const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
-    await runWebhookCreateCommand(projectRoot);
+
+    try {
+      await runWebhookCreateCommand(projectRoot);
+    } finally {
+      captured.restore();
+    }
 
     const output = captured.lines.join("\n");
     expect(output).toContain("Could not load config");
-    captured.restore();
   });
 });

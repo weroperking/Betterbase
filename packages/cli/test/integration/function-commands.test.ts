@@ -419,8 +419,8 @@ describe("runFunctionCommand list", () => {
 
     // Both statuses appear
     const lines = captured.lines;
-    const builtCount = lines.filter((l) => l.includes("built")).length;
-    const notBuiltCount = lines.filter((l) => l.includes("not built")).length;
+    const builtCount = lines.filter((l) => /\bbuilt\b/.test(l)).length;
+    const notBuiltCount = lines.filter((l) => /\bnot built\b/.test(l)).length;
     expect(builtCount).toBeGreaterThanOrEqual(1);
     expect(notBuiltCount).toBeGreaterThanOrEqual(1);
   });

@@ -7,150 +7,102 @@
  * Verifies file outputs, ordering guarantees, and end-to-end behavior.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTestProject } from "../fixtures/fixtures";
 
-// ── Mocks ────────────────────────────────────────────────────────────────────────
-
-const iacSyncPath = join(import.meta.dir, "../../src/commands/iac/sync.ts");
-const iacGenPath = join(import.meta.dir, "../../src/commands/iac/generate.ts");
-const iacAnalyzePath = join(import.meta.dir, "../../src/commands/iac/analyze.ts");
-
-let syncCalls: number[] = [];
-let genCalls: number[] = [];
-let analyzeCalls: number[] = [];
-
-function resetMocks() {
-	syncCalls = [];
-	genCalls = [];
-	analyzeCalls = [];
-}
-
-mock.module(iacSyncPath, () => ({
-	runIacSync: async (projectRoot: string, opts?: { force?: boolean; silent?: boolean }) => {
-		syncCalls.push(Date.now());
-		// Simulate: writes betterbase/schema.ts and betterbase/functions/
-		const bbDir = join(projectRoot, "betterbase");
-		mkdirSync(join(bbDir, "functions"), { recursive: true });
-		writeFileSync(join(bbDir, "schema.ts"), "export const schema = {};");
-		writeFileSync(join(bbDir, "functions", "getUsers.ts"), "export const getUsers = {};");
-		if (opts?.silent) {
-			// Silent mode - no output
-		}
-		return { success: true };
-	},
-}));
-
-mock.module(iacGenPath, () => ({
-	runIacGenerate: async (projectRoot: string) => {
-		genCalls.push(Date.now());
-		// Simulate: writes betterbase/config.ts
-		const bbDir = join(projectRoot, "betterbase");
-		mkdirSync(bbDir, { recursive: true });
-		writeFileSync(join(bbDir, "config.ts"), "export const config = {};");
-		return { success: true };
-	},
-}));
-
-mock.module(iacAnalyzePath, () => ({
-	runIacAnalyze: async (projectRoot: string, opts?: { output?: "table" | "json" }) => {
-		analyzeCalls.push(Date.now());
-		// Simulate: scans betterbase/queries and returns analysis
-		if (opts?.output === "json") {
-			console.log(JSON.stringify([{ path: "queries/getUsers.ts", complexity: "low", issues: [] }]));
-		} else {
-			console.log("Analysis complete — 1 query scanned.");
-		}
-	},
-}));
-
-const { runIacSync } = await import("../../src/commands/iac/sync");
-const { runIacGenerate } = await import("../../src/commands/iac/generate");
-const { runIacAnalyze } = await import("../../src/commands/iac/analyze");
+import { runIacSync } from "../../src/commands/iac/sync";
+import { runIacGenerate } from "../../src/commands/iac/generate";
+import { runIacAnalyze } from "../../src/commands/iac/analyze";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function makeProject() {
 	return createTestProject({
 		"package.json": JSON.stringify({ name: "test-iac-workflow" }),
+		// Real BetterBase IaC schema that sync expects
+		"betterbase/schema.ts": `
+import { defineSchema, defineTable, text, timestamp } from "@betterbase/core";
+
+export default defineSchema({
+  user: defineTable({
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  }),
+});
+		`,
 	});
+}
+
+function captureConsole() {
+	const lines: string[] = [];
+	const logSpy = mock((...args: unknown[]) => lines.push(args.map(String).join(" ")));
+	const origLog = console.log;
+	console.log = logSpy as unknown as typeof console.log;
+	return { lines, restore: () => { console.log = origLog; } };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe("IAC Workflow — Full Pipeline", () => {
-	beforeEach(() => {
-		resetMocks();
-	});
-
+describe("IAC Workflow Pipeline (real implementations)", () => {
 	afterEach(() => {
 		mock.restore();
 	});
 
-	it("sync → generate → analyze executes in correct order and touches expected files", async () => {
+	it("iac sync generates schema.json and drizzle migrations", async () => {
 		const proj = makeProject();
-
-		// 1. iac sync
-		await runIacSync(proj.root, { force: false, silent: false });
-		expect(syncCalls).toHaveLength(1);
-
-		// Files from sync
-		expect(existsSync(join(proj.root, "betterbase", "schema.ts"))).toBe(true);
-		expect(existsSync(join(proj.root, "betterbase", "functions", "getUsers.ts"))).toBe(true);
-
-		// 2. iac generate
-		await runIacGenerate(proj.root);
-		expect(genCalls).toHaveLength(1);
-		expect(existsSync(join(proj.root, "betterbase", "config.ts"))).toBe(true);
-
-		// 3. iac analyze (JSON output captured)
-		const logs: string[] = [];
-		const logSpy = mock((...args: unknown[]) => logs.push(args.map(String).join(" ")));
-		const origLog = console.log;
-		console.log = logSpy as unknown as typeof console.log;
-
 		try {
-			await runIacAnalyze(proj.root, { output: "json" });
+			await runIacSync(proj.root);
+			expect(existsSync(join(proj.root, "betterbase/_generated/schema.json"))).toBe(true);
+			expect(existsSync(join(proj.root, "drizzle/migrations"))).toBe(true);
 		} finally {
-			console.log = origLog;
+			proj.cleanup();
 		}
-		expect(analyzeCalls).toHaveLength(1);
-
-		// Verify analyze output contains expected key
-		const jsonOutput = logs.join(" ");
-		expect(jsonOutput).toContain("queries/getUsers.ts");
-		expect(jsonOutput).toContain("low");
-
-		proj.cleanup();
 	});
 
-	it("handles analyze when queries directory is empty (no findings)", async () => {
+	it("iac generate creates api.d.ts", async () => {
 		const proj = makeProject();
-		// Only run analyze without prior sync/generate files
-		await runIacAnalyze(proj.root);
-		expect(analyzeCalls).toHaveLength(1);
-		proj.cleanup();
+		try {
+			await runIacGenerate(proj.root);
+			expect(existsSync(join(proj.root, "betterbase/_generated/api.d.ts"))).toBe(true);
+		} finally {
+			proj.cleanup();
+		}
 	});
 
-	it("generate can be called multiple times (idempotent)", async () => {
+	it("iac analyze scans queries and outputs analysis", async () => {
 		const proj = makeProject();
-		await runIacGenerate(proj.root);
-		await runIacGenerate(proj.root);
-		expect(genCalls).toHaveLength(2);
-		// Second call overwrites, not error
-		expect(existsSync(join(proj.root, "betterbase", "config.ts"))).toBe(true);
-		proj.cleanup();
+		try {
+			mkdirSync(join(proj.root, "betterbase", "queries"), { recursive: true });
+			writeFileSync(
+				join(proj.root, "betterbase", "queries", "getUsers.ts"),
+				`import { query } from "@betterbase/core";
+export const getUsers = query((c) => c.table("user").select());`,
+			);
+			const captured = captureConsole();
+			await runIacAnalyze(proj.root);
+			expect(captured.lines.some((l) => l.includes("getUsers") || l.includes("scanned"))).toBe(true);
+			captured.restore();
+		} finally {
+			proj.cleanup();
+		}
 	});
 
-	it("sync can be forced to overwrite existing files", async () => {
+	it("full pipeline: sync → generate → analyze", async () => {
 		const proj = makeProject();
-		// First sync
-		await runIacSync(proj.root, { force: false, silent: true });
-		// Second sync with force (simulated via opts)
-		await runIacSync(proj.root, { force: true, silent: true });
-		expect(syncCalls).toHaveLength(2);
-		proj.cleanup();
+		try {
+			await runIacSync(proj.root);
+			await runIacGenerate(proj.root);
+			expect(existsSync(join(proj.root, "betterbase/_generated/api.d.ts"))).toBe(true);
+
+			const captured = captureConsole();
+			await runIacAnalyze(proj.root);
+			expect(captured.lines.length).toBeGreaterThan(0);
+			captured.restore();
+		} finally {
+			proj.cleanup();
+		}
 	});
 });

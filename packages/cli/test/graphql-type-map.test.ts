@@ -11,6 +11,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Map Drizzle column types to GraphQL types
@@ -500,7 +501,7 @@ describe("CLI GraphQL Type Map - typeMap completeness", () => {
 
 describe("CLI GraphQL Type Map - Source File Comparison", () => {
 	it("should match the typeMap in src/commands/graphql.ts exactly", () => {
-		const __dirname = path.dirname(new URL(import.meta.url).pathname);
+		const __dirname = path.dirname(fileURLToPath(import.meta.url));
 		const sourcePath = path.join(__dirname, "..", "src", "commands", "graphql.ts");
 		const source = readFileSync(sourcePath, "utf-8");
 

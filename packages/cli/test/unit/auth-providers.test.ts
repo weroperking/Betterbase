@@ -21,7 +21,7 @@ describe("auth-providers", () => {
 
     it("each provider has required fields", () => {
       for (const [key, template] of Object.entries(PROVIDER_TEMPLATES)) {
-        expect(template.name).toBeString();
+        expect(key).toBe(template.name);
         expect(template.displayName).toBeString();
         expect(Array.isArray(template.envVars)).toBe(true);
         expect(template.envVars.length).toBeGreaterThan(0);

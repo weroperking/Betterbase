@@ -91,6 +91,11 @@ describe("runLoginCommand", () => {
 				});
 			}
 			if (method === "GET" && url.includes("/admin/auth/me")) {
+				// Verify Authorization header is present and Bearer token
+				const headers = new Headers(init?.headers as HeadersInit);
+				const authHeader = headers.get("authorization");
+				expect(authHeader).toBeDefined();
+				expect(authHeader).toMatch(/^Bearer\s+.+$/);
 				return new Response(JSON.stringify(ADMIN_ME_RESPONSE), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },

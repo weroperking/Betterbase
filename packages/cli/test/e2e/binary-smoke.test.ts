@@ -7,13 +7,22 @@ const CLI_DIR = join(import.meta.dir, "..", "..");
 const DIST_DIR = join(CLI_DIR, "dist");
 
 function runCommand(cmd: string, args: string[] = []): { exitCode: number; stdout: string; stderr: string } {
-	const result = spawnSync(cmd, args, {
+	const executable = cmd === "bun" ? process.execPath : cmd;
+	const resolvedArgs = cmd === "bun" ? args : args;
+	const result = spawnSync(executable, resolvedArgs, {
 		cwd: CLI_DIR,
 		stdio: ["pipe", "pipe", "pipe"],
 		encoding: "utf-8",
 	});
+	if (result.error) {
+		return {
+			exitCode: 1,
+			stdout: "",
+			stderr: result.error.message ?? "spawn error",
+		};
+	}
 	return {
-		exitCode: result.status ?? 0,
+		exitCode: result.status ?? 1,
 		stdout: result.stdout ?? "",
 		stderr: result.stderr ?? "",
 	};

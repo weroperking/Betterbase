@@ -21,8 +21,9 @@ export function createTestDatabase(): TestDatabase {
     CREATE TABLE IF NOT EXISTS _betterbase_webhook_deliveries (
       id TEXT PRIMARY KEY,
       webhook_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      request_url TEXT,
+      status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'pending')),
+      request_url TEXT NOT NULL,
+      request_body TEXT,
       response_code INTEGER,
       response_body TEXT,
       error TEXT,
@@ -55,17 +56,29 @@ export function seedWebhookDeliveries(
   deliveries: {
     id: string;
     webhook_id: string;
-    status: string;
+    status: "success" | "failed" | "pending";
     response_code?: number;
     error?: string;
+    request_url?: string;
+    request_body?: string;
+    response_body?: string;
   }[],
 ): void {
   const stmt = db.prepare(
     `INSERT INTO _betterbase_webhook_deliveries
-     (id, webhook_id, status, response_code, error, attempt_count)
-     VALUES (?, ?, ?, ?, ?, 1)`,
+     (id, webhook_id, status, request_url, request_body, response_code, response_body, error, attempt_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
   );
   for (const d of deliveries) {
-    stmt.run(d.id, d.webhook_id, d.status, d.response_code ?? null, d.error ?? null);
+    stmt.run(
+      d.id,
+      d.webhook_id,
+      d.status,
+      d.request_url ?? null,
+      d.request_body ?? null,
+      d.response_code ?? null,
+      d.response_body ?? null,
+      d.error ?? null,
+    );
   }
 }

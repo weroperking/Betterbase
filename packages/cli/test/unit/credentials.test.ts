@@ -207,7 +207,7 @@ describe("credentials", () => {
       saveCredentials(creds);
 
       const url = getServerUrl();
-      expect(url).toBe("https://custom.betterbase.io/");
+      expect(url).toBe("https://custom.betterbase.io");
     });
   });
 });

@@ -378,7 +378,7 @@ describe("runStorageUploadCommand", () => {
     writeFileSync(path.join(t.root, "data.txt"), "test");
     mockConfigResult = VALID_CONFIG;
     setEnv(ENV_CREDS);
-    uploadSpy.mockImplementation(async () => {
+    uploadSpy.mockImplementationOnce(async () => {
       throw new Error("Bucket not found");
     });
     errorSpy = spyOn(console, "error").mockImplementation(() => {});

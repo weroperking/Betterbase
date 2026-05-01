@@ -1,6 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
-// Force chalk to emit ANSI colors in test environment
+// Save and restore FORCE_COLOR to prevent leaking to other tests
+const origForceColor = process.env.FORCE_COLOR;
 process.env.FORCE_COLOR = "1";
 
 // Dynamically import logger after forcing color support
@@ -8,6 +9,14 @@ let logger!: typeof import("../src/utils/logger");
 
 beforeAll(async () => {
 	logger = await import("../src/utils/logger");
+});
+
+afterAll(() => {
+	if (origForceColor === undefined) {
+		delete process.env.FORCE_COLOR;
+	} else {
+		process.env.FORCE_COLOR = origForceColor;
+	}
 });
 
 function stripAnsi(str: string): string {
@@ -60,12 +69,12 @@ describe("Logger utility", () => {
 			expect(output).toContain("Special chars: @#$%^&*()");
 		});
 
-		it("calls console.log with cyan ◆ prefix", () => {
+		it("calls console.log with info symbol prefix", () => {
 			logger.info("info test");
 			expect(spyLog).toHaveBeenCalledTimes(1);
 			const raw = spyLog.mock.calls[0][0] as string;
 			const stripped = stripAnsi(raw);
-			expect(stripped).toContain("◆ info test");
+			expect(stripped).toContain(`${logger.sym.info} info test`);
 			expect(raw).not.toBe(stripped); // ANSI codes present
 		});
 	});
@@ -86,12 +95,12 @@ describe("Logger utility", () => {
 			expect(output).toContain(logger.sym.warn);
 		});
 
-		it("calls console.warn with yellow ⚠ prefix", () => {
+		it("calls console.warn with warning symbol prefix", () => {
 			logger.warn("warn test");
 			expect(spyWarn).toHaveBeenCalledTimes(1);
 			const raw = spyWarn.mock.calls[0][0] as string;
 			const stripped = stripAnsi(raw);
-			expect(stripped).toContain("⚠ warn test");
+			expect(stripped).toContain(`${logger.sym.warn} warn test`);
 			expect(raw).not.toBe(stripped);
 		});
 	});
@@ -132,12 +141,12 @@ describe("Logger utility", () => {
 			expect(spyError).toHaveBeenCalledTimes(1);
 		});
 
-		it("calls console.error with red ✗ prefix and colored message", () => {
+		it("calls console.error with error symbol prefix and colored message", () => {
 			logger.error("error test");
 			expect(spyError).toHaveBeenCalledTimes(1);
 			const raw = spyError.mock.calls[0][0] as string;
 			const stripped = stripAnsi(raw);
-			expect(stripped).toContain("✗ error test");
+			expect(stripped).toContain(`${logger.sym.error} error test`);
 			expect(raw).not.toBe(stripped);
 		});
 
@@ -166,12 +175,12 @@ describe("Logger utility", () => {
 			expect(output).toContain(logger.sym.success);
 		});
 
-		it("calls console.log with green ✓ prefix", () => {
+		it("calls console.log with success symbol prefix", () => {
 			logger.success("success test");
 			expect(spyLog).toHaveBeenCalledTimes(1);
 			const raw = spyLog.mock.calls[0][0] as string;
 			const stripped = stripAnsi(raw);
-			expect(stripped).toContain("✓ success test");
+			expect(stripped).toContain(`${logger.sym.success} success test`);
 			expect(raw).not.toBe(stripped);
 		});
 	});
@@ -307,9 +316,9 @@ describe("Logger utility", () => {
 		it("outputs tree lines with proper indentation and symbols", () => {
 			logger.tree(["file1.ts", "dir/file2.ts", "dir/file3.ts"]);
 			expect(spyLog).toHaveBeenCalledTimes(3);
-			expect(stripAnsi(spyLog.mock.calls[0][0] as string)).toBe("  ├─ file1.ts");
-			expect(stripAnsi(spyLog.mock.calls[1][0] as string)).toBe("  ├─ dir/file2.ts");
-			expect(stripAnsi(spyLog.mock.calls[2][0] as string)).toBe("  └─ dir/file3.ts");
+			expect(stripAnsi(spyLog.mock.calls[0][0] as string)).toBe(`  ${logger.sym.tree} file1.ts`);
+			expect(stripAnsi(spyLog.mock.calls[1][0] as string)).toBe(`  ${logger.sym.tree} dir/file2.ts`);
+			expect(stripAnsi(spyLog.mock.calls[2][0] as string)).toBe(`  ${logger.sym.treeLast} dir/file3.ts`);
 		});
 	});
 

@@ -63,8 +63,12 @@ async function copyIaCTemplate(targetDir: string): Promise<void> {
 		try {
 			const content = await readFile(srcPath);
 			await writeFile(destPath, content);
-		} catch {
-			// Skip if file doesn't exist
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException | undefined)?.code;
+			if (code === "ENOENT") {
+				throw new Error(`Missing IaC template file: ${srcPath}`);
+			}
+			throw error;
 		}
 	}
 
@@ -183,7 +187,7 @@ function getAuthDialect(provider: ProviderType): "sqlite" | "pg" | "mysql" {
 }
 
 async function installDependencies(projectPath: string): Promise<void> {
-	const installProcess = Bun.spawn(["bun", "install"], {
+	const installProcess = Bun.spawn([process.execPath, "install"], {
 		cwd: projectPath,
 		stdout: "inherit",
 		stderr: "inherit",
@@ -471,7 +475,7 @@ try {
   const sqlite = new Database(env.DB_PATH, { create: true });
   const db = drizzle(sqlite);
 
-  migrate(db, { migrationsFolder: './drizzle' });
+	await migrate(db, { migrationsFolder: './drizzle' });
   console.log('Migrations applied successfully.');
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -855,8 +859,38 @@ const s3 = new S3Client({
 ${endpointLine}
 });
 
-const BUCKET = process.env.STORAGE_BUCKET ?? ''
-`;
+const BUCKET = process.env.STORAGE_BUCKET ?? '';
+
+export const storageRoute = new Hono();
+
+storageRoute.put('/:key', async (c) => {
+  const key = c.req.param('key');
+  const body = await c.req.arrayBuffer();
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: Buffer.from(body),
+  }));
+  return c.json({ ok: true });
+});
+
+storageRoute.get('/:key', async (c) => {
+  const key = c.req.param('key');
+  const url = await getSignedUrl(s3, new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  }), { expiresIn: 3600 });
+  return c.json({ url });
+});
+
+storageRoute.delete('/:key', async (c) => {
+  const key = c.req.param('key');
+  await s3.send(new DeleteObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  }));
+  return c.json({ ok: true });
+});`;
 }
 
 async function writeProjectFiles(
