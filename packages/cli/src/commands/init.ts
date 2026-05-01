@@ -11,7 +11,7 @@ import { generateEnvContent, promptForProvider } from "../utils/provider-prompts
  * Copy the IaC template to the target directory
  */
 async function copyIaCTemplate(targetDir: string): Promise<void> {
-	const templateDir = path.join(import.meta.dir, "..", "..", "..", "templates", "iac");
+	const templateDir = path.join(import.meta.dir, "..", "..", "..", "..", "templates", "iac");
 
 	// Check if template exists
 	try {
