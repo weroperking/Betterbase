@@ -41,11 +41,11 @@ describe("auth-providers", () => {
       }
     });
 
-    it("each template has correct callback URL pattern", () => {
-      for (const [key, template] of Object.entries(PROVIDER_TEMPLATES)) {
-        expect(template.configCode).toContain("/api/auth/callback/");
-      }
-    });
+it("each template has correct callback URL pattern", () => {
+       for (const [key, template] of Object.entries(PROVIDER_TEMPLATES)) {
+         expect(template.configCode).toContain(`/api/auth/callback/${key}`);
+       }
+     });
   });
 
   describe("getProviderTemplate", () => {

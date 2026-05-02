@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, tmpdir } from "node:os";
 import {
 	runLoginCommand,
 	runApiKeyLogin,
@@ -18,19 +18,17 @@ import {
 	ADMIN_LOGIN_ERROR,
 	mockFetch,
 } from "../fixtures/fetch-mock";
-import {
-	setupCredentialsFile,
-	createValidCredentials,
-	createExpiredCredentials,
-} from "../fixtures/credentials";
 
-const CREDENTIALS_FILE = join(homedir(), ".betterbase", "credentials.json");
+// Use sandboxed temp directory for credentials
+const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-login-test-"));
+const CREDENTIALS_FILE = join(tempHomeDir, ".betterbase", "credentials.json");
 
 function cleanupCredentialsFile() {
 	try {
 		if (existsSync(CREDENTIALS_FILE)) {
 			rmSync(CREDENTIALS_FILE);
 		}
+		rmSync(tempHomeDir, { recursive: true, force: true });
 	} catch {
 		/* ignore */
 	}

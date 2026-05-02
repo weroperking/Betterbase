@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdtempSync, tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -11,7 +11,9 @@ import {
   type Credentials,
 } from "../../src/utils/credentials";
 
-const BETTERBASE_DIR = join(homedir(), ".betterbase");
+// Use sandboxed temp directory for credentials tests
+const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-creds-test-"));
+const BETTERBASE_DIR = join(tempHomeDir, ".betterbase");
 const CREDENTIALS_FILE = join(BETTERBASE_DIR, "credentials.json");
 
 function cleanupCredentialsFile() {
@@ -19,6 +21,7 @@ function cleanupCredentialsFile() {
     if (existsSync(CREDENTIALS_FILE)) {
       rmSync(CREDENTIALS_FILE);
     }
+    rmSync(tempHomeDir, { recursive: true, force: true });
   } catch { /* ignore */ }
 }
 

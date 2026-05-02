@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
+import { createTestProject } from "../fixtures/fixtures";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -733,22 +734,26 @@ describe("runWebhookCommand routing", () => {
 });
 
 describe("generateWebhookId via runWebhookCreateCommand", () => {
+  let captured: ReturnType<typeof captureConsole>;
+
   it("creates a webhook ID with correct prefix and logs it", async () => {
     const t = createTestProject({
       "betterbase.config.js": VALID_CONFIG_JS,
     });
     captured = captureConsole();
 
-    const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
-    await runWebhookCreateCommand(t.root);
+    try {
+      const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
+      await runWebhookCreateCommand(t.root);
 
-    const output = captured.lines.join("\n");
-    // Should contain success message with webhook ID
-    expect(output).toMatch(/Webhook created with ID:\s+webhook-[0-9a-z]+/);
-    expect(output).toContain("Webhook created");
-
-    captured.restore();
-    cleanupProject(t.root);
+      const output = captured.lines.join("\n");
+      // Should contain success message with webhook ID
+      expect(output).toMatch(/Webhook created with ID:\s+webhook-[0-9a-z]+/);
+      expect(output).toContain("Webhook created");
+    } finally {
+      captured.restore();
+      cleanupProject(t.root);
+    }
   });
 
   it("produces unique IDs across calls", async () => {
@@ -757,14 +762,17 @@ describe("generateWebhookId via runWebhookCreateCommand", () => {
     for (let i = 0; i < 2; i++) {
       captured = captureConsole();
       const t = createTestProject({ "betterbase.config.js": VALID_CONFIG_JS });
-      const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
-      await runWebhookCreateCommand(t.root);
-      const output = captured.lines.join("\n");
-      const match = output.match(/webhook-[0-9a-z]+/);
-      expect(match).not.toBeNull();
-      ids.push(match![0]);
-      captured.restore();
-      cleanupProject(t.root);
+      try {
+        const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
+        await runWebhookCreateCommand(t.root);
+        const output = captured.lines.join("\n");
+        const match = output.match(/webhook-[0-9a-z]+/);
+        expect(match).not.toBeNull();
+        ids.push(match![0]);
+      } finally {
+        captured.restore();
+        cleanupProject(t.root);
+      }
       await new Promise(r => setTimeout(r, 10));
     }
 
@@ -775,13 +783,30 @@ describe("generateWebhookId via runWebhookCreateCommand", () => {
     expect(suffix1.localeCompare(suffix0)).toBeGreaterThan(0);
   });
 
-  it("IDs are monotonically increasing with time", () => {
-    const now = Date.now();
-    const id1 = `webhook-${now.toString(36)}`;
-    const id2 = `webhook-${(now + 100).toString(36)}`;
-    const suffix1 = id1.replace("webhook-", "");
-    const suffix2 = id2.replace("webhook-", "");
-    expect(suffix2.localeCompare(suffix1)).toBeGreaterThan(0);
+  it("IDs are monotonically increasing with time", async () => {
+    const ids: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      captured = captureConsole();
+      const t = createTestProject({ "betterbase.config.js": VALID_CONFIG_JS });
+      try {
+        const { runWebhookCreateCommand } = await import("../../src/commands/webhook");
+        await runWebhookCreateCommand(t.root);
+        const output = captured.lines.join("\n");
+        const match = output.match(/webhook-[0-9a-z]+/);
+        expect(match).not.toBeNull();
+        ids.push(match![0]);
+      } finally {
+        captured.restore();
+        cleanupProject(t.root);
+      }
+      await new Promise(r => setTimeout(r, 10));
+    }
+
+    // Later timestamp produces lexicographically greater suffix
+    const suffix0 = ids[0].replace("webhook-", "");
+    const suffix1 = ids[1].replace("webhook-", "");
+    expect(suffix1.localeCompare(suffix0)).toBeGreaterThan(0);
   });
 });
 

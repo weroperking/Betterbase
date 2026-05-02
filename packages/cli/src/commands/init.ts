@@ -863,6 +863,15 @@ const BUCKET = process.env.STORAGE_BUCKET ?? '';
 
 export const storageRoute = new Hono();
 
+// TODO: Replace with your production auth middleware before deploying
+storageRoute.use('*', async (c, next) => {
+  const authHeader = c.req.header('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  await next();
+});
+
 storageRoute.put('/:key', async (c) => {
   const key = c.req.param('key');
   const body = await c.req.arrayBuffer();

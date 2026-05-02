@@ -82,9 +82,12 @@ describe("IAC Workflow Pipeline (real implementations)", () => {
 export const getUsers = query((c) => c.table("user").select());`,
 			);
 			const captured = captureConsole();
-			await runIacAnalyze(proj.root);
-			expect(captured.lines.some((l) => l.includes("getUsers") || l.includes("scanned"))).toBe(true);
-			captured.restore();
+			try {
+				await runIacAnalyze(proj.root);
+				expect(captured.lines.some((l) => l.includes("getUsers") || l.includes("scanned"))).toBe(true);
+			} finally {
+				captured.restore();
+			}
 		} finally {
 			proj.cleanup();
 		}
@@ -98,9 +101,12 @@ export const getUsers = query((c) => c.table("user").select());`,
 			expect(existsSync(join(proj.root, "betterbase/_generated/api.d.ts"))).toBe(true);
 
 			const captured = captureConsole();
-			await runIacAnalyze(proj.root);
-			expect(captured.lines.length).toBeGreaterThan(0);
-			captured.restore();
+			try {
+				await runIacAnalyze(proj.root);
+				expect(captured.lines.length).toBeGreaterThan(0);
+			} finally {
+				captured.restore();
+			}
 		} finally {
 			proj.cleanup();
 		}

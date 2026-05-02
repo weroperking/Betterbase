@@ -59,7 +59,7 @@ export function seedWebhookDeliveries(
     status: "success" | "failed" | "pending";
     response_code?: number;
     error?: string;
-    request_url?: string;
+    request_url: string;
     request_body?: string;
     response_body?: string;
   }[],
@@ -74,7 +74,7 @@ export function seedWebhookDeliveries(
       d.id,
       d.webhook_id,
       d.status,
-      d.request_url ?? null,
+      d.request_url,
       d.request_body ?? null,
       d.response_code ?? null,
       d.response_body ?? null,

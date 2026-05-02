@@ -177,6 +177,7 @@ describe("runDevCommand", () => {
 		expect(processManagerStarted).toBe(true);
 		expect(watcherStarted).toBe(true);
 
+		await cleanup();
 		project.cleanup();
 	});
 

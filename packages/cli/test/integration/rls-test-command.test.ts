@@ -321,22 +321,24 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(4);
+        for (const stmt of policyStmts) {
+          expect(stmt).toContain("auth.uid() = user_id");
+        }
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(4);
-      for (const stmt of policyStmts) {
-        expect(stmt).toContain("auth.uid() = user_id");
-      }
-
-      proj.cleanup();
-      restoreEnv(env);
     });
   });
 
@@ -358,23 +360,25 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(1);
+        expect(policyStmts[0]).toContain("FOR SELECT USING (");
+        expect(policyStmts[0]).not.toContain("FOR INSERT");
+        expect(policyStmts[0]).not.toContain("FOR UPDATE");
+        expect(policyStmts[0]).not.toContain("FOR DELETE");
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(1);
-      expect(policyStmts[0]).toContain("FOR SELECT USING (");
-      expect(policyStmts[0]).not.toContain("FOR INSERT");
-      expect(policyStmts[0]).not.toContain("FOR UPDATE");
-      expect(policyStmts[0]).not.toContain("FOR DELETE");
-
-      proj.cleanup();
-      restoreEnv(env);
     });
 
     it("generates CREATE POLICY for select + insert", async () => {
@@ -393,22 +397,24 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(1);
+        expect(policyStmts[0]).toContain("FOR SELECT USING (");
+        expect(policyStmts[0]).toContain("FOR INSERT WITH CHECK (");
+        expect(policyStmts[0]).toContain(";");
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(1);
-      expect(policyStmts[0]).toContain("FOR SELECT USING (");
-      expect(policyStmts[0]).toContain("FOR INSERT WITH CHECK (");
-      expect(policyStmts[0]).toContain(";");
-
-      proj.cleanup();
-      restoreEnv(env);
     });
 
     it("generates CREATE POLICY for all operations", async () => {
@@ -429,25 +435,27 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(1);
+        const combined = policyStmts[0];
+        expect(combined).toContain("FOR SELECT USING (");
+        expect(combined).toContain("FOR INSERT WITH CHECK (");
+        expect(combined).toContain("FOR UPDATE USING (");
+        expect(combined).toContain("FOR DELETE USING (");
+        expect((combined.match(/CREATE POLICY/gi) || []).length).toBe(4);
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(1);
-      const combined = policyStmts[0];
-      expect(combined).toContain("FOR SELECT USING (");
-      expect(combined).toContain("FOR INSERT WITH CHECK (");
-      expect(combined).toContain("FOR UPDATE USING (");
-      expect(combined).toContain("FOR DELETE USING (");
-      expect((combined.match(/CREATE POLICY/gi) || []).length).toBe(4);
-
-      proj.cleanup();
-      restoreEnv(env);
     });
 
     it("returns empty string when policy file has no operations", async () => {
@@ -465,19 +473,21 @@ describe("RLS Test Command", () => {
       });
 
       try {
-        await runRLSTestCommand(proj.root, "users");
-      } catch {
-        // Expected — no real DB
+        try {
+          await runRLSTestCommand(proj.root, "users");
+        } catch {
+          // Expected — no real DB
+        }
+
+        const policyStmts = capturedSqlCalls.filter((s) =>
+          s.toUpperCase().includes("CREATE POLICY"),
+        );
+
+        expect(policyStmts.length).toBe(0);
+      } finally {
+        proj.cleanup();
+        restoreEnv(env);
       }
-
-      const policyStmts = capturedSqlCalls.filter((s) =>
-        s.toUpperCase().includes("CREATE POLICY"),
-      );
-
-      expect(policyStmts.length).toBe(0);
-
-      proj.cleanup();
-      restoreEnv(env);
     });
   });
 
@@ -490,13 +500,15 @@ describe("RLS Test Command", () => {
       delete process.env.DB_URL;
       mockDbType = "sqlite";
 
-      await expect(
-        runRLSTestCommand("/fake/project", "users"),
-      ).rejects.toThrow(
-        "RLS testing is only supported for PostgreSQL databases. Current: sqlite",
-      );
-
-      restoreEnv(env);
+      try {
+        await expect(
+          runRLSTestCommand("/fake/project", "users"),
+        ).rejects.toThrow(
+          "RLS testing is only supported for PostgreSQL databases. Current: sqlite",
+        );
+      } finally {
+        restoreEnv(env);
+      }
     });
 
     it("throws when DATABASE_URL is missing", async () => {
@@ -505,11 +517,13 @@ describe("RLS Test Command", () => {
       delete process.env.DB_URL;
       mockDbType = "postgresql";
 
-      await expect(
-        runRLSTestCommand("/fake/project", "users"),
-      ).rejects.toThrow("DATABASE_URL not found in environment");
-
-      restoreEnv(env);
+      try {
+        await expect(
+          runRLSTestCommand("/fake/project", "users"),
+        ).rejects.toThrow("DATABASE_URL not found in environment");
+      } finally {
+        restoreEnv(env);
+      }
     });
   });
 });

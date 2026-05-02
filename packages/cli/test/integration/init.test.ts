@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -290,23 +290,6 @@ describe("InitCommandOptions", () => {
 // runInitCommand — importable and callable
 // ---------------------------------------------------------------------------
 
-import { afterEach, beforeEach, describe, expect, it, mock, beforeAll } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { z } from "zod";
-import { rm } from "node:fs/promises";
-
-import { type InitCommandOptions, runInitCommand } from "../../src/commands/init";
-
-// ... keep existing unit test describe blocks up through "runInitCommand" basic tests ...
-// Then replace the IaC template structure and build output equivalence sections:
-
-// ---------------------------------------------------------------------------
-// Init Command — IaC integration (real command execution)
-// ---------------------------------------------------------------------------
-
 describe("runInitCommand (IaC integration)", () => {
 	it("copies full IaC template into new project directory", async () => {
 		const projectName = `bb-test-${randomUUID().slice(0, 8)}`;
@@ -362,5 +345,4 @@ describe("runInitCommand (IaC integration)", () => {
 			await rm(projectPath, { recursive: true, force: true });
 		}
 	});
-});
 });

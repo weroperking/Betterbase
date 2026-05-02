@@ -115,7 +115,13 @@ describe("runStorageBucketsListCommand", () => {
   afterEach(() => {
     resetMocks();
     clearEnv(ENV_CREDS);
-    clearEnv({ STORAGE_PROVIDER: "", STORAGE_BUCKET: "" });
+    clearEnv({
+      STORAGE_PROVIDER: "",
+      STORAGE_BUCKET: "",
+      STORAGE_REGION: "",
+      STORAGE_ACCESS_KEY_ID: "",
+      STORAGE_SECRET_ACCESS_KEY: "",
+    });
     logSpy?.mockRestore();
     errorSpy?.mockRestore();
   });
@@ -260,7 +266,13 @@ describe("runStorageUploadCommand", () => {
   afterEach(() => {
     resetMocks();
     clearEnv(ENV_CREDS);
-    clearEnv({ STORAGE_PROVIDER: "", STORAGE_BUCKET: "" });
+    clearEnv({
+      STORAGE_PROVIDER: "",
+      STORAGE_BUCKET: "",
+      STORAGE_REGION: "",
+      STORAGE_ACCESS_KEY_ID: "",
+      STORAGE_SECRET_ACCESS_KEY: "",
+    });
     logSpy?.mockRestore();
     errorSpy?.mockRestore();
   });
