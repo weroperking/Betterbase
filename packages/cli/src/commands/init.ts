@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { generateDrizzleConfig } from "@betterbase/core/config";
@@ -11,7 +12,31 @@ import { generateEnvContent, promptForProvider } from "../utils/provider-prompts
  * Copy the IaC template to the target directory
  */
 async function copyIaCTemplate(targetDir: string): Promise<void> {
-	const templateDir = path.join(import.meta.dir, "..", "..", "..", "..", "templates", "iac");
+	// Try multiple possible template locations to support both development and production scenarios
+	const possibleTemplatePaths = [
+		// When installed globally and templates are copied to dist/templates (production)
+		path.join(import.meta.dir, "..", "..", "..", "..", "templates", "iac"),
+		// When running from built monorepo (packages/cli/dist -> betterbase/templates)
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+		// When running from monorepo source with one level of nesting
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+		// When running from monorepo source with betterbase/ subdirectory
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+	];
+
+	let templateDir: string | null = null;
+	for (const testPath of possibleTemplatePaths) {
+		if (existsSync(testPath)) {
+			templateDir = testPath;
+			break;
+		}
+	}
+
+	if (!templateDir) {
+		throw new Error(
+			`IaC template not found. Searched:\n${possibleTemplatePaths.map((p) => `  - ${p}`).join("\n")}`
+		);
+	}
 
 	// Check if template exists
 	try {
@@ -475,7 +500,7 @@ try {
   const sqlite = new Database(env.DB_PATH, { create: true });
   const db = drizzle(sqlite);
 
-	await migrate(db, { migrationsFolder: './drizzle' });
+  await migrate(db, { migrationsFolder: './drizzle' });
   console.log('Migrations applied successfully.');
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

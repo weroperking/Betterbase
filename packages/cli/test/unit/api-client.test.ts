@@ -87,7 +87,7 @@ describe("api-client", () => {
 
       const fakeResponse = { data: "test_result" };
       const origFetch = globalThis.fetch;
-      globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const mockFetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
         const headers = init?.headers as Record<string, string> | undefined;
         expect(headers?.Authorization).toBe("Bearer valid_token");
         return new Response(JSON.stringify(fakeResponse), {
@@ -95,6 +95,8 @@ describe("api-client", () => {
           headers: { "Content-Type": "application/json" },
         });
       });
+      (mockFetch as any).preconnect = false;
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
 
       try {
         const result = await apiRequest("/test/path");
@@ -114,12 +116,14 @@ describe("api-client", () => {
       saveCredentials(creds);
 
       const origFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      const mockFetch = mock(async () => {
         return new Response(JSON.stringify({ error: "Not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
       });
+      (mockFetch as any).preconnect = false;
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
 
       try {
         await expect(apiRequest("/test/path")).rejects.toThrow("Not found");
@@ -138,12 +142,14 @@ describe("api-client", () => {
       saveCredentials(creds);
 
       const origFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      const mockFetch = mock(async () => {
         return new Response(JSON.stringify({ message: "Server error" }), {
           status: 500,
           headers: { "Content-Type": "application/json" },
         });
       });
+      (mockFetch as any).preconnect = false;
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
 
       try {
         await expect(apiRequest("/test/path")).rejects.toThrow("HTTP 500");

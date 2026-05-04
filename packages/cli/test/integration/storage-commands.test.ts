@@ -240,7 +240,7 @@ describe("runStorageBucketsListCommand", () => {
     const t = createTestProject();
     mockConfigResult = VALID_CONFIG;
     setEnv(ENV_CREDS);
-    listObjectsSpy.mockImplementation(async () => {
+    listObjectsSpy.mockImplementationOnce(async () => {
       throw new Error("Connection refused");
     });
     errorSpy = spyOn(console, "error").mockImplementation(() => {});

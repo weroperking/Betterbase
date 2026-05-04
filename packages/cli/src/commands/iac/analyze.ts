@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import * as logger from "../../utils/logger";
 
@@ -48,9 +48,10 @@ interface QueryAnalysis {
 
 function scanQueries(betterbaseDir: string): string[] {
 	const queriesDir = join(betterbaseDir, "queries");
-	const files: string[] = [];
-
+	if (!existsSync(queriesDir)) return [];
 	if (!statSync(queriesDir).isDirectory()) return [];
+
+	const files: string[] = [];
 
 	function walk(dir: string) {
 		for (const entry of readdirSync(dir)) {

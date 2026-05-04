@@ -1,3 +1,7 @@
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
+
 export interface MockFetchRoute {
   method?: string;
   url: string | RegExp;
@@ -67,3 +71,38 @@ export const ADMIN_LOGIN_RESPONSE = {
 };
 
 export const ADMIN_LOGIN_ERROR = { error: "Invalid credentials" };
+
+export function setupCredentialsFile(credentials: { token: string; admin_email: string; server_url: string }) {
+  const credentialsDir = join(tmpdir(), ".betterbase");
+  mkdirSync(credentialsDir, { recursive: true });
+  const credentialsFile = join(credentialsDir, "credentials.json");
+  writeFileSync(
+    credentialsFile,
+    JSON.stringify({
+      token: credentials.token,
+      admin_email: credentials.admin_email,
+      server_url: credentials.server_url,
+      created_at: new Date().toISOString(),
+    }),
+    "utf-8",
+  );
+  return credentialsFile;
+}
+
+export function createValidCredentials() {
+  return {
+    token: "token_test123",
+    admin_email: "admin@test.com",
+    server_url: "https://api.betterbase.io",
+    created_at: new Date().toISOString(),
+  };
+}
+
+export function createExpiredCredentials() {
+  return {
+    token: "expired_token",
+    admin_email: "admin@test.com",
+    server_url: "https://api.betterbase.io",
+    created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 24 hours ago
+  };
+}

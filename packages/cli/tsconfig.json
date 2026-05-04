@@ -2,7 +2,10 @@
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"types": ["bun"],
-		"outDir": "dist"
+		"outDir": "dist",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"moduleResolution": "bundler"
 	},
 	"include": ["src/**/*.ts", "test/**/*.ts"]
 }

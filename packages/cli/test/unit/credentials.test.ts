@@ -1,8 +1,7 @@
 import { afterAll, afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtempSync, tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   clearCredentials,
   loadCredentials,
@@ -16,13 +15,16 @@ const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-creds-test-"));
 const BETTERBASE_DIR = join(tempHomeDir, ".betterbase");
 const CREDENTIALS_FILE = join(BETTERBASE_DIR, "credentials.json");
 
+// Set env var BEFORE importing the module
+process.env.BB_CREDENTIALS_DIR = BETTERBASE_DIR;
+
 function cleanupCredentialsFile() {
-  try {
-    if (existsSync(CREDENTIALS_FILE)) {
-      rmSync(CREDENTIALS_FILE);
-    }
-    rmSync(tempHomeDir, { recursive: true, force: true });
-  } catch { /* ignore */ }
+	try {
+		if (existsSync(CREDENTIALS_FILE)) {
+			rmSync(CREDENTIALS_FILE);
+		}
+		rmSync(tempHomeDir, { recursive: true, force: true });
+	} catch { /* ignore */ }
 }
 
 describe("credentials", () => {

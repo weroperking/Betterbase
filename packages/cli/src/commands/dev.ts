@@ -119,12 +119,12 @@ export async function runDevCommand(projectRoot: string) {
 	watcher.start(projectRoot);
 
 	// --- Graceful shutdown ---
-	process.on("SIGINT", async () => {
-		await shutdown();
+	process.on("SIGINT", () => {
+		void shutdown();
 		process.exit(0);
 	});
-	process.on("SIGTERM", async () => {
-		await shutdown();
+	process.on("SIGTERM", () => {
+		void shutdown();
 		process.exit(0);
 	});
 

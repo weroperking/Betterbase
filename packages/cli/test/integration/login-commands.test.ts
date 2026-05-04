@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { mkdtempSync, tmpdir } from "node:os";
 import {
 	runLoginCommand,
 	runApiKeyLogin,
@@ -10,18 +10,21 @@ import {
 	isAuthenticated,
 } from "../../src/commands/login";
 import {
-	DEVICE_CODE_RESPONSE,
-	TOKEN_RESPONSE_PENDING,
-	TOKEN_RESPONSE_SUCCESS,
-	ADMIN_ME_RESPONSE,
-	ADMIN_LOGIN_RESPONSE,
-	ADMIN_LOGIN_ERROR,
-	mockFetch,
+  DEVICE_CODE_RESPONSE,
+  TOKEN_RESPONSE_PENDING,
+  TOKEN_RESPONSE_SUCCESS,
+  ADMIN_ME_RESPONSE,
+  ADMIN_LOGIN_RESPONSE,
+  ADMIN_LOGIN_ERROR,
+  mockFetch,
 } from "../fixtures/fetch-mock";
 
 // Use sandboxed temp directory for credentials
 const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-login-test-"));
 const CREDENTIALS_FILE = join(tempHomeDir, ".betterbase", "credentials.json");
+
+// Set env var BEFORE importing the module
+process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
 
 function cleanupCredentialsFile() {
 	try {
@@ -32,6 +35,30 @@ function cleanupCredentialsFile() {
 	} catch {
 		/* ignore */
 	}
+}
+
+function createValidCredentials() {
+	return {
+		token: "token_test123",
+		admin_email: "admin@test.com",
+		server_url: "https://api.betterbase.io",
+		created_at: new Date().toISOString(),
+	};
+}
+
+function createExpiredCredentials() {
+	return {
+		token: "token_expired",
+		admin_email: "admin@test.com",
+		server_url: "https://api.betterbase.io",
+		created_at: "2020-01-01T00:00:00.000Z",
+	};
+}
+
+function setupCredentialsFile(creds: ReturnType<typeof createValidCredentials>) {
+	mkdirSync(join(tempHomeDir, ".betterbase"), { recursive: true });
+	writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2));
+	return () => cleanupCredentialsFile();
 }
 
 function mockProcessExit() {

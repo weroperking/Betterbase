@@ -293,8 +293,8 @@ describe("InitCommandOptions", () => {
 describe("runInitCommand (IaC integration)", () => {
 	it("copies full IaC template into new project directory", async () => {
 		const projectName = `bb-test-${randomUUID().slice(0, 8)}`;
-		// Create a temporary parent directory
-		const parentDir = join(import.meta.dir, "..", "..", "..", "..", "tmp-integration-parent");
+		// Create a temporary parent directory in OS temp dir
+		const parentDir = join(tmpdir(), `tmp-integration-parent-${randomUUID().slice(0, 8)}`);
 		await mkdir(parentDir, { recursive: true });
 		const projectPath = join(parentDir, projectName);
 
@@ -343,6 +343,7 @@ describe("runInitCommand (IaC integration)", () => {
 		} finally {
 			process.chdir(origCwd);
 			await rm(projectPath, { recursive: true, force: true });
+			await rm(parentDir, { recursive: true, force: true });
 		}
 	});
 });

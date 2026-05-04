@@ -664,33 +664,35 @@ describe("runFunctionCommand deploy", () => {
     expect(syncEnvToCloudflareSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("warns about missing env vars in .env when syncing", async () => {
-    const project = createTestProject({
-      "src/functions/missing-env/index.ts": "export default {}",
-      ".env": "EXISTING_KEY=value\n",
-    });
-    projectRoot = project.root;
-
-    mockReadFunctionConfigResult = {
-      name: "missing-env",
-      runtime: "cloudflare-workers",
-      env: ["EXISTING_KEY", "MISSING_KEY"],
-    };
-    mockBundleFunctionResult = { success: true, outputPath: "/tmp/missing-env.js", size: 256, errors: [] };
-    mockDeployToCloudflareResult = {
-      success: true,
-      url: "https://missing-env.example.workers.dev",
-      logs: [],
-    };
-
-    captured = captureConsole();
-    await runFunctionCommand(["deploy", "missing-env", "--sync-env"], projectRoot);
-
-    const output = captured.lines.join("\n");
-    expect(output).toContain("Warning: Missing env vars in .env: MISSING_KEY");
-    expect(output).toContain("MISSING_KEY");
-    expect(output).toContain("(not set)");
+it("warns about missing env vars in .env when syncing", async () => {
+  const project = createTestProject({
+    "src/functions/missing-env/index.ts": "export default {}",
+    ".env": "EXISTING_KEY=value\n",
   });
+  projectRoot = project.root;
+
+  mockReadFunctionConfigResult = {
+    name: "missing-env",
+    runtime: "cloudflare-workers",
+    env: ["EXISTING_KEY", "MISSING_KEY"],
+  };
+  mockBundleFunctionResult = { success: true, outputPath: "/tmp/missing-env.js", size: 256, errors: [] };
+  mockDeployToCloudflareResult = {
+    success: true,
+    url: "https://missing-env.example.workers.dev",
+    logs: [],
+  };
+
+  captured = captureConsole();
+  await runFunctionCommand(["deploy", "missing-env", "--sync-env"], projectRoot);
+  // syncEnvToCloudflare should still be called even with missing vars (just warns)
+  expect(syncEnvToCloudflareSpy).toHaveBeenCalledTimes(1);
+
+  const output = captured.lines.join("\n");
+  expect(output).toContain("Warning: Missing env vars in .env: MISSING_KEY");
+  expect(output).toContain("MISSING_KEY");
+  expect(output).toContain("(not set)");
+});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -912,6 +914,7 @@ describe("stopAllFunctions", () => {
     captured = captureConsole();
     await stopAllFunctions();
     // Should not throw, should not log anything
+    expect(captured.lines).toHaveLength(0);
   });
 
   it("does not throw on subsequent calls", async () => {

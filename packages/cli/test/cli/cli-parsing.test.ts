@@ -636,7 +636,7 @@ describe("CLI argument parsing regression", () => {
 			const program = createProgram();
 			try {
 				await program.parseAsync(["node", "bb", "--help"]);
-				expect.fail("Expected CommanderError to be thrown");
+				throw new Error("Expected CommanderError to be thrown");
 			} catch (err) {
 				expect(err).toBeInstanceOf(CommanderError);
 				expect((err as CommanderError).code).toBe("commander.helpDisplayed");
@@ -649,7 +649,7 @@ describe("CLI argument parsing regression", () => {
 			const program = createProgram();
 			try {
 				await program.parseAsync(["node", "bb", "--version"]);
-				expect.fail("Expected CommanderError to be thrown");
+				throw new Error("Expected CommanderError to be thrown");
 			} catch (err) {
 				expect(err).toBeInstanceOf(CommanderError);
 				expect((err as CommanderError).code).toBe("commander.version");
@@ -662,7 +662,7 @@ describe("CLI argument parsing regression", () => {
 			const program = createProgram();
 			try {
 				await program.parseAsync(["node", "bb", "unknown-command"]);
-				expect.fail("Expected CommanderError to be thrown");
+				throw new Error("Expected CommanderError to be thrown");
 			} catch (err) {
 				expect(err).toBeInstanceOf(CommanderError);
 				expect((err as CommanderError).code).toBe("commander.unknownCommand");

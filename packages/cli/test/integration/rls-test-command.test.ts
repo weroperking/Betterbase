@@ -196,39 +196,45 @@ describe("RLS Test Command", () => {
 
   // ── getDatabaseUrl (tests 1–2) ──────────────────────────────────────────────
 
-  describe("getDatabaseUrl", () => {
-    it("returns DATABASE_URL when set in env", async () => {
-      const env = saveEnv();
-      process.env.DATABASE_URL = "postgres://localhost:5432/testdb";
-      delete process.env.DB_URL;
-      mockDbType = "postgresql";
+   describe("getDatabaseUrl", () => {
+     it("returns DATABASE_URL when set in env", async () => {
+       const env = saveEnv();
+       process.env.DATABASE_URL = "postgres://localhost:5432/testdb";
+       delete process.env.DB_URL;
+       mockDbType = "postgresql";
 
-      try {
-        await runRLSTestCommand("/fake/project", "users");
-      } catch {
-        // Expected — no real DB
-      }
+       try {
+         try {
+           await runRLSTestCommand("/fake/project", "users");
+         } catch {
+           // Expected — no real DB
+         }
 
-      expect(capturedDbUrl).toBe("postgres://localhost:5432/testdb");
-      restoreEnv(env);
-    });
+         expect(capturedDbUrl).toBe("postgres://localhost:5432/testdb");
+       } finally {
+         restoreEnv(env);
+       }
+     });
 
-    it("throws when DATABASE_URL is not set", async () => {
-      const env = saveEnv();
-      delete process.env.DATABASE_URL;
-      delete process.env.DB_URL;
-      mockDbType = "postgresql";
+     it("throws when DATABASE_URL is not set", async () => {
+       const env = saveEnv();
+       delete process.env.DATABASE_URL;
+       delete process.env.DB_URL;
+       mockDbType = "postgresql";
 
-      await expect(
-        runRLSTestCommand("/fake/project", "users"),
-      ).rejects.toThrow(
-        "DATABASE_URL not found in environment. Please ensure you have a PostgreSQL database configured.",
-      );
+       try {
+         await expect(
+           runRLSTestCommand("/fake/project", "users"),
+         ).rejects.toThrow(
+           "DATABASE_URL not found in environment. Please ensure you have a PostgreSQL database configured.",
+         );
 
-      expect(capturedDbUrl).toBeNull();
-      restoreEnv(env);
-    });
-  });
+         expect(capturedDbUrl).toBeNull();
+       } finally {
+         restoreEnv(env);
+       }
+     });
+   });
 
   // ── loadTablePolicies (tests 3–4) ───────────────────────────────────────────
 
