@@ -70,7 +70,7 @@ function scanQueries(betterbaseDir: string): string[] {
 
 function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 	const content = readFileSync(filePath, "utf-8");
-	const path = filePath.replace(betterbaseDir + "/", "");
+	const path = relative(betterbaseDir, filePath);
 
 	const issues: string[] = [];
 	const suggestions: string[] = [];

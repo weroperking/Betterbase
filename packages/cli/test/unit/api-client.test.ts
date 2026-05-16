@@ -12,9 +12,6 @@ const CREDENTIALS_FILE = join(tempHomeDir, ".betterbase", "credentials.json");
 // Save original BB_CREDENTIALS_DIR
 const originalBBCredentialsDir = process.env.BB_CREDENTIALS_DIR;
 
-// Set env var BEFORE importing the module
-process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
-
 function cleanupCredentialsFile() {
   	try {
   		if (existsSync(CREDENTIALS_FILE)) {
@@ -31,6 +28,12 @@ function cleanupCredentialsFile() {
   }
 
 describe("api-client", () => {
+  beforeEach(() => {
+    // Recreate sandbox directory for each test
+    rmSync(tempHomeDir, { recursive: true, force: true });
+    const newTempHomeDir = mkdtempSync(join(tmpdir(), "bb-api-client-test-"));
+    process.env.BB_CREDENTIALS_DIR = join(newTempHomeDir, ".betterbase");
+  });
   afterEach(cleanupCredentialsFile);
   afterAll(cleanupCredentialsFile);
 
@@ -102,14 +105,14 @@ describe("api-client", () => {
 
       const fakeResponse = { data: "test_result" };
       const origFetch = globalThis.fetch;
-      const mockFetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const headers = init?.headers as Record<string, string> | undefined;
-        expect(headers?.Authorization).toBe("Bearer valid_token");
-        return new Response(JSON.stringify(fakeResponse), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      });
+       const mockFetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+         const headers = new Headers(init?.headers);
+         expect(headers.get("Authorization")).toBe("Bearer valid_token");
+         return new Response(JSON.stringify(fakeResponse), {
+           status: 200,
+           headers: { "Content-Type": "application/json" },
+         });
+       });
       (mockFetch as any).preconnect = false;
       globalThis.fetch = mockFetch as unknown as typeof fetch;
 

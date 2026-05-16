@@ -17,7 +17,7 @@ export function mockFetch(
 
   const mock = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const method = init?.method ?? "GET";
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     const request = new Request(input instanceof Request ? input : url, init);
     calls.push(request);
 

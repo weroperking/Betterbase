@@ -82,8 +82,11 @@ function mockProcessExit() {
 }
 
 describe("runLoginCommand", () => {
-	afterEach(cleanupCredentialsFile);
-	afterAll(cleanupCredentialsFile);
+  beforeEach(() => {
+    process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
+  });
+  afterEach(cleanupCredentialsFile);
+  afterAll(cleanupCredentialsFile);
 
 	it("completes device code flow and saves credentials", async () => {
 		const origSetTimeout = globalThis.setTimeout;

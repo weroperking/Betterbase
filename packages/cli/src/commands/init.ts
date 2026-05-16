@@ -900,11 +900,21 @@ export const storageRoute = new Hono();
 
 // TODO: Replace with your production auth middleware before deploying
 storageRoute.use('*', async (c, next) => {
-  const authHeader = c.req.header('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ error: 'Unauthorized' }, 401);
+  // Import auth middleware dynamically to avoid circular dependencies
+  try {
+    const { requireAuth } = await import('./middleware/auth');
+    return requireAuth(c, next);
+  } catch (e) {
+    // Fallback to simple bearer check for development
+    const authHeader = c.req.header('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    // In a real app, you would verify the token here
+    // For now, we'll just pass it through but log a warning
+    console.warn('Using fallback auth - replace with proper token verification');
+    await next();
   }
-  await next();
 });
 
 storageRoute.put('/:key', async (c) => {
