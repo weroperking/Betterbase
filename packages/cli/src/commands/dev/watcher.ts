@@ -1,6 +1,7 @@
 import { watch } from "fs";
 import { existsSync } from "fs";
-import { extname, join, relative } from "path";
+import { extname, join } from "path";
+import path from "node:path";
 import { info } from "../../utils/logger";
 
 type WatchEvent = {
@@ -40,7 +41,7 @@ export class DevWatcher {
 			const w = watch(path, { recursive }, (event, filename) => {
 				if (!filename) return;
 				const fullPath = join(path, String(filename));
-				const rel = relative(projectRoot, fullPath);
+				const rel = path.relative(projectRoot, fullPath);
 
 				if (rel.includes("_generated")) return; // never watch generated files
 				if (rel.includes("node_modules")) return;
@@ -58,7 +59,7 @@ export class DevWatcher {
 		info(
 			`[dev] Watching ${dirs
 				.filter((d) => existsSync(d.path))
-				.map((d) => relative(projectRoot, d.path))
+				.map((d) => path.relative(projectRoot, d.path))
 				.join(", ")}`,
 		);
 	}
