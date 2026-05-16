@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import * as logger from "../../utils/logger";
 
@@ -16,7 +16,7 @@ export async function runIacAnalyze(
 ): Promise<void> {
 	const betterbaseDir = join(projectRoot, "betterbase");
 
-	if (!statSync(betterbaseDir).isDirectory()) {
+	if (!existsSync(betterbaseDir) || !statSync(betterbaseDir).isDirectory()) {
 		logger.error("No betterbase/ directory found. Run this from a BetterBase project.");
 		return;
 	}
@@ -27,7 +27,7 @@ export async function runIacAnalyze(
 	const results: QueryAnalysis[] = [];
 
 	for (const q of queries) {
-		const analysis = analyzeQuery(q);
+		const analysis = analyzeQuery(q, betterbaseDir);
 		results.push(analysis);
 	}
 
@@ -48,9 +48,10 @@ interface QueryAnalysis {
 
 function scanQueries(betterbaseDir: string): string[] {
 	const queriesDir = join(betterbaseDir, "queries");
-	const files: string[] = [];
-
+	if (!existsSync(queriesDir)) return [];
 	if (!statSync(queriesDir).isDirectory()) return [];
+
+	const files: string[] = [];
 
 	function walk(dir: string) {
 		for (const entry of readdirSync(dir)) {
@@ -67,9 +68,9 @@ function scanQueries(betterbaseDir: string): string[] {
 	return files;
 }
 
-function analyzeQuery(filePath: string): QueryAnalysis {
+function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 	const content = readFileSync(filePath, "utf-8");
-	const path = filePath.replace(join(process.cwd(), "betterbase/"), "");
+	const path = relative(betterbaseDir, filePath);
 
 	const issues: string[] = [];
 	const suggestions: string[] = [];

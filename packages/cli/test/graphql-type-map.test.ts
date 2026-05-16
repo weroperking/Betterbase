@@ -4,46 +4,49 @@
  * Tests for the chain code maps in graphql.ts CLI command:
  * - typeMap: Maps Drizzle column types to GraphQL types
  * - drizzleTypeToGraphQL(): Converts Drizzle types to GraphQL type strings
+ *
+ * Note: drizzleTypeToGraphQL is NOT exported from src/commands/graphql.ts. This test file includes the implementation and verifies it via source file comparison tests.
  */
 
 import { describe, expect, it } from "bun:test";
-
-// Import the function to test - we'll test the logic directly
-// This is the typeMap and drizzleTypeToGraphQL from graphql.ts
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Map Drizzle column types to GraphQL types
- * This is the typeMap from graphql.ts CLI command
+ * This is the typeMap from graphql.ts CLI command (duplicated locally since
+ * the function is not exported from src/commands/graphql.ts).
  */
-function drizzleTypeToGraphQL(drizzleType: string): string {
-	const typeMap: Record<string, string> = {
-		integer: "Int",
-		int: "Int",
-		smallint: "Int",
-		bigint: "Int",
-		real: "Float",
-		double: "Float",
-		float: "Float",
-		numeric: "Float",
-		decimal: "Float",
-		boolean: "Boolean",
-		bool: "Boolean",
-		text: "String",
-		varchar: "String",
-		char: "String",
-		uuid: "ID",
-		timestamp: "DateTime",
-		timestamptz: "DateTime",
-		datetime: "DateTime",
-		date: "DateTime",
-		json: "JSON",
-		jsonb: "JSON",
-		blob: "String",
-		bytea: "String",
-	};
+const LOCAL_TYPE_MAP: Record<string, string> = {
+	integer: "Int",
+	int: "Int",
+	smallint: "Int",
+	bigint: "Int",
+	real: "Float",
+	double: "Float",
+	float: "Float",
+	numeric: "Float",
+	decimal: "Float",
+	boolean: "Boolean",
+	bool: "Boolean",
+	text: "String",
+	varchar: "String",
+	char: "String",
+	uuid: "ID",
+	timestamp: "DateTime",
+	timestamptz: "DateTime",
+	datetime: "DateTime",
+	date: "DateTime",
+	json: "JSON",
+	jsonb: "JSON",
+	blob: "String",
+	bytea: "String",
+};
 
+function drizzleTypeToGraphQL(drizzleType: string): string {
 	const lowerType = drizzleType.toLowerCase();
-	return typeMap[lowerType] || "String";
+	return LOCAL_TYPE_MAP[lowerType] || "String";
 }
 
 describe("CLI GraphQL Type Map - drizzleTypeToGraphQL", () => {
@@ -493,5 +496,44 @@ describe("CLI GraphQL Type Map - typeMap completeness", () => {
 			expect(result).toBeDefined();
 			expect(typeof result).toBe("string");
 		});
+	});
+});
+
+describe("CLI GraphQL Type Map - Source File Comparison", () => {
+	it("should match the typeMap in src/commands/graphql.ts exactly", () => {
+		const __dirname = path.dirname(fileURLToPath(import.meta.url));
+		const sourcePath = path.join(__dirname, "..", "src", "commands", "graphql.ts");
+		const source = readFileSync(sourcePath, "utf-8");
+
+		// Extract the typeMap object from inside the drizzleTypeToGraphQL function
+		// The typeMap is defined as: const typeMap: Record<string, string> = { ... };
+		const typeMapRegex = /const\s+typeMap\s*:\s*Record<string,\s*string>\s*=\s*{([\s\S]*?)};/;
+		const match = source.match(typeMapRegex);
+
+		if (!match) {
+			throw new Error("Could not find typeMap definition in source file");
+		}
+
+		const typeMapBody = match[1];
+
+		// Parse key-value pairs from the typeMap body
+		const parsedSourceTypeMap: Record<string, string> = {};
+		const entryRegex = /(\w+)\s*:\s*"([^"]+)"/g;
+		let entryMatch;
+		while ((entryMatch = entryRegex.exec(typeMapBody)) !== null) {
+			const key = entryMatch[1];
+			const value = entryMatch[2];
+			parsedSourceTypeMap[key] = value;
+		}
+
+		// Compare source typeMap with LOCAL_TYPE_MAP
+		const localEntries = Object.entries(LOCAL_TYPE_MAP);
+		const sourceEntries = Object.entries(parsedSourceTypeMap);
+
+		expect(sourceEntries.length).toBe(localEntries.length);
+
+		for (const [key, value] of localEntries) {
+			expect(parsedSourceTypeMap).toHaveProperty(key, value);
+		}
 	});
 });

@@ -63,6 +63,19 @@ function collectTsFiles(dir: string): string[] {
 	return files;
 }
 
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+	let current = expression;
+	while (
+		ts.isParenthesizedExpression(current) ||
+		ts.isAsExpression(current) ||
+		ts.isSatisfiesExpression(current)
+	) {
+		// @ts-ignore – the expression property exists on these node types
+		current = current.expression;
+	}
+	return current;
+}
+
 export class RouteScanner {
 	scan(routesDir: string): Record<string, RouteInfo[]> {
 		const files = collectTsFiles(routesDir);
@@ -91,19 +104,7 @@ export class RouteScanner {
 		const routes: Record<string, RouteInfo[]> = {};
 		const authIdentifiers = new Set<string>();
 
-		const isAuthMiddlewareExpression = (expr: ts.Expression): boolean => {
-			if (ts.isIdentifier(expr)) {
-				return authIdentifiers.has(expr.text) || isAuthLikeName(expr.text);
-			}
-
-			if (ts.isPropertyAccessExpression(expr)) {
-				const text = expr.getText(sourceFile);
-				return isAuthLikeName(text);
-			}
-
-			return false;
-		};
-
+		// ── Collect auth identifiers (unchanged) ───────────────────────────────────
 		const collectAuthIdentifiers = (node: ts.Node): void => {
 			if (!ts.isVariableStatement(node)) return;
 
@@ -127,13 +128,100 @@ export class RouteScanner {
 
 		ts.forEachChild(sourceFile, collectAuthIdentifiers);
 
+		// ── Collect group definitions for nested route prefixing ────────────────────
+		const groupParent: Record<string, string> = {}; // child var -> parent var
+		const groupPath: Record<string, string> = {};   // var -> its path segment
+
+		const collectGroups = (node: ts.Node): void => {
+			if (ts.isVariableStatement(node)) {
+				for (const decl of node.declarationList.declarations) {
+					if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
+					// Unwrap to get actual call expression (handle parentheses)
+					const init = unwrapExpression(decl.initializer);
+					if (ts.isCallExpression(init)) {
+						const callExpr = init as ts.CallExpression;
+						// Check if the callee is a property access with name "group"
+						const callee = callExpr.expression;
+						if (
+							ts.isPropertyAccessExpression(callee) &&
+							callee.name.text === "group"
+						) {
+							// parent is the object on which .group() is called
+							const parentExpr = callee.expression;
+							let parentName = "";
+							if (ts.isIdentifier(parentExpr)) {
+								parentName = parentExpr.text;
+							}
+							// Extract group path from first argument
+							const pathArg = callExpr.arguments[0];
+							const pathStr = getStringLiteral(pathArg);
+							groupParent[decl.name.text] = parentName;
+							groupPath[decl.name.text] = pathStr;
+						}
+					}
+				}
+			}
+			ts.forEachChild(node, collectGroups);
+		};
+
+		collectGroups(sourceFile);
+
+		// Helper: compute full prefix for a router variable by following parent chain
+		const getFullPrefix = (varName: string): string => {
+			let prefix = "";
+			let current = varName;
+			const visited = new Set<string>();
+			while (groupParent[current] !== undefined && !visited.has(current)) {
+				visited.add(current);
+				const parent = groupParent[current];
+				const segment = groupPath[current] || "";
+				// Ensure segment starts with '/'
+				const seg = segment.startsWith("/") ? segment : "/" + segment;
+				prefix = seg + prefix;
+				current = parent;
+			}
+			return prefix;
+		};
+
+		// ── Extract route definitions ─────────────────────────────────────────────
+		const isAuthMiddlewareExpression = (expr: ts.Expression): boolean => {
+			if (ts.isIdentifier(expr)) {
+				return authIdentifiers.has(expr.text) || isAuthLikeName(expr.text);
+			}
+			if (ts.isPropertyAccessExpression(expr)) {
+				const text = expr.getText(sourceFile);
+				return isAuthLikeName(text);
+			}
+			return false;
+		};
+
 		const visit = (node: ts.Node): void => {
 			if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
 				const method = node.expression.name.text.toLowerCase();
 
 				if (httpMethods.has(method)) {
 					const [pathArg, ...handlerArgs] = node.arguments;
-					const routePath = getStringLiteral(pathArg);
+					const basePath = getStringLiteral(pathArg);
+
+					// Determine the router variable this method is called on
+					const routerExpr = node.expression.expression; // the object before .method
+					let routerVar: string | null = null;
+					if (ts.isIdentifier(routerExpr)) {
+						routerVar = routerExpr.text;
+					} else if (ts.isPropertyAccessExpression(routerExpr)) {
+						// Handle deeper chaining (unlikely): recursively get identifier
+						let cur: ts.Node = routerExpr;
+						while (ts.isPropertyAccessExpression(cur)) {
+							if (ts.isIdentifier(cur.expression)) {
+								routerVar = cur.expression.text;
+								break;
+							}
+							cur = cur.expression;
+						}
+					}
+
+					const prefix = routerVar ? getFullPrefix(routerVar) : "";
+					const fullPath = prefix + basePath;
 
 					let requiresAuth = false;
 					for (const arg of handlerArgs) {
@@ -145,17 +233,17 @@ export class RouteScanner {
 
 					const route: RouteInfo = {
 						method: method.toUpperCase(),
-						path: routePath,
+						path: fullPath,
 						requiresAuth,
 						inputSchema: this.findSchemaUsage(sourceFile, handlerArgs, "input"),
 						outputSchema: this.findSchemaUsage(sourceFile, handlerArgs, "output"),
 					};
 
-					if (!routes[routePath]) {
-						routes[routePath] = [];
+					if (!routes[fullPath]) {
+						routes[fullPath] = [];
 					}
 
-					routes[routePath].push(route);
+					routes[fullPath].push(route);
 				}
 			}
 

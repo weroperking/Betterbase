@@ -22,6 +22,12 @@ export const ColumnInfoSchema = z.object({
 	primaryKey: z.boolean(),
 	defaultValue: z.string().optional(),
 	references: z.string().optional(),
+	// Raw Drizzle type method name (e.g., 'text', 'varchar', 'integer')
+	dataType: z.string().optional(),
+	// Array modifier
+	array: z.boolean().optional(),
+	// Enum values if column uses .enum()
+	enum: z.array(z.string()).optional(),
 });
 
 export const TableInfoSchema = z.object({
@@ -121,7 +127,8 @@ export class SchemaScanner {
 						functionName === "mysqlTable"
 					) {
 						const tableObj = this.parseTable(initializer);
-						const tableKey = tableObj.name || declaration.name.text;
+						// Use the variable name as the key, per spec (easier for codegen)
+						const tableKey = declaration.name.text;
 						tables[tableKey] = tableObj;
 					}
 				}
@@ -278,40 +285,51 @@ export class SchemaScanner {
 
 	private parseColumn(columnName: string, expression: ts.Expression): ColumnInfo {
 		let type: ColumnInfo["type"] = "unknown";
+		let dataType: string | undefined = undefined; // raw type method name
 		let nullable = true;
 		let unique = false;
 		let primaryKey = false;
 		let defaultValue: string | undefined;
 		let references: string | undefined;
+		let array = false;
+		let enumValues: string[] | undefined = undefined;
 
 		let current = unwrapExpression(expression);
 
 		while (ts.isCallExpression(current)) {
 			const methodName = getCallName(current);
 
-			if (methodName === "text" || methodName === "varchar" || methodName === "char") {
+			// Type methods: set both dataType and simplified type
+			if (!dataType && (methodName === "text" || methodName === "varchar" || methodName === "char")) {
+				dataType = methodName;
 				type = "text";
-			} else if (
+			} else if (!dataType && (
 				methodName === "integer" ||
 				methodName === "int" ||
 				methodName === "bigint" ||
 				methodName === "serial"
-			) {
+			)) {
+				dataType = methodName;
 				type = "integer";
-			} else if (
+			} else if (!dataType && (
 				methodName === "real" ||
 				methodName === "numeric" ||
 				methodName === "decimal" ||
 				methodName === "doublePrecision"
-			) {
+			)) {
+				dataType = methodName;
 				type = "number";
-			} else if (methodName === "boolean") {
+			} else if (!dataType && methodName === "boolean") {
+				dataType = methodName;
 				type = "boolean";
-			} else if (methodName === "timestamp" || methodName === "datetime") {
+			} else if (!dataType && (methodName === "timestamp" || methodName === "datetime")) {
+				dataType = methodName;
 				type = "datetime";
-			} else if (methodName === "json" || methodName === "jsonb") {
+			} else if (!dataType && (methodName === "json" || methodName === "jsonb")) {
+				dataType = methodName;
 				type = "json";
-			} else if (methodName === "blob") {
+			} else if (!dataType && methodName === "blob") {
+				dataType = methodName;
 				type = "blob";
 			} else if (methodName === "notNull") {
 				nullable = false;
@@ -324,6 +342,21 @@ export class SchemaScanner {
 				defaultValue = getExpressionText(this.sourceFile, current.arguments[0]);
 			} else if (methodName === "references") {
 				references = getExpressionText(this.sourceFile, current.arguments[0]);
+			} else if (methodName === "array") {
+				array = true;
+			} else if (methodName === "enum") {
+				// Extract enum values from first argument (array literal)
+				if (current.arguments.length > 0) {
+					const arg = current.arguments[0];
+					if (ts.isArrayLiteralExpression(arg)) {
+						enumValues = arg.elements.map(el => {
+							if (ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el)) {
+								return el.text;
+							}
+							return el.getText(this.sourceFile);
+						});
+					}
+				}
 			}
 
 			if (ts.isPropertyAccessExpression(current.expression)) {
@@ -342,6 +375,9 @@ export class SchemaScanner {
 			primaryKey,
 			defaultValue,
 			references,
+			dataType,
+			array,
+			enum: enumValues,
 		};
 	}
 }
