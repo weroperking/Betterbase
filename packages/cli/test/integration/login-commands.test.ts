@@ -23,6 +23,9 @@ import {
 const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-login-test-"));
 const CREDENTIALS_FILE = join(tempHomeDir, ".betterbase", "credentials.json");
 
+// Save the original BB_CREDENTIALS_DIR before overwriting
+const originalBBCredentialsDir = process.env.BB_CREDENTIALS_DIR;
+
 // Set env var BEFORE importing the module
 process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
 
@@ -34,6 +37,12 @@ function cleanupCredentialsFile() {
 		rmSync(tempHomeDir, { recursive: true, force: true });
 	} catch {
 		/* ignore */
+	}
+	// Restore original BB_CREDENTIALS_DIR
+	if (originalBBCredentialsDir === undefined) {
+		delete process.env.BB_CREDENTIALS_DIR;
+	} else {
+		process.env.BB_CREDENTIALS_DIR = originalBBCredentialsDir;
 	}
 }
 

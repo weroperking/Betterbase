@@ -16,7 +16,7 @@ export async function runIacAnalyze(
 ): Promise<void> {
 	const betterbaseDir = join(projectRoot, "betterbase");
 
-	if (!statSync(betterbaseDir).isDirectory()) {
+	if (!existsSync(betterbaseDir) || !statSync(betterbaseDir).isDirectory()) {
 		logger.error("No betterbase/ directory found. Run this from a BetterBase project.");
 		return;
 	}
@@ -27,7 +27,7 @@ export async function runIacAnalyze(
 	const results: QueryAnalysis[] = [];
 
 	for (const q of queries) {
-		const analysis = analyzeQuery(q);
+		const analysis = analyzeQuery(q, betterbaseDir);
 		results.push(analysis);
 	}
 
@@ -68,9 +68,9 @@ function scanQueries(betterbaseDir: string): string[] {
 	return files;
 }
 
-function analyzeQuery(filePath: string): QueryAnalysis {
+function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 	const content = readFileSync(filePath, "utf-8");
-	const path = filePath.replace(join(process.cwd(), "betterbase/"), "");
+	const path = filePath.replace(betterbaseDir + "/", "");
 
 	const issues: string[] = [];
 	const suggestions: string[] = [];

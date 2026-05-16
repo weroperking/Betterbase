@@ -156,7 +156,19 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	// Minimal cleanup - full logic disabled for typecheck
+	// Remove only handlers added during the test
+	const currentSIGINT = process.listeners("SIGINT") as ((...args: any[]) => void)[];
+	const currentSIGTERM = process.listeners("SIGTERM") as ((...args: any[]) => void)[];
+	for (const fn of currentSIGINT) {
+		if (!baselineSIGINT.includes(fn)) {
+			process.removeListener("SIGINT", fn);
+		}
+	}
+	for (const fn of currentSIGTERM) {
+		if (!baselineSIGTERM.includes(fn)) {
+			process.removeListener("SIGTERM", fn);
+		}
+	}
 	if (currentProject) {
 		currentProject.cleanup();
 		currentProject = null;

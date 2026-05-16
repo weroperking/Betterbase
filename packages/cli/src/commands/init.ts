@@ -11,7 +11,7 @@ import { generateEnvContent, promptForProvider } from "../utils/provider-prompts
 /**
  * Copy the IaC template to the target directory
  */
-async function copyIaCTemplate(targetDir: string): Promise<void> {
+async function copyIaCTemplate(targetDir: string, projectName: string): Promise<void> {
 	// Try multiple possible template locations to support both development and production scenarios
 	const possibleTemplatePaths = [
 		// When installed globally and templates are copied to dist/templates (production)
@@ -95,6 +95,16 @@ async function copyIaCTemplate(targetDir: string): Promise<void> {
 			}
 			throw error;
 		}
+	}
+
+	// Inject the user-supplied project name into the copied package.json
+	const pkgPath = path.join(targetDir, "package.json");
+	try {
+		const pkgJson = JSON.parse(await readFile(pkgPath, "utf-8"));
+		pkgJson.name = projectName;
+		await writeFile(pkgPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
+	} catch {
+		// package.json absent from template — safe to skip
 	}
 
 	// Create .env file with multi-provider support
@@ -1415,7 +1425,7 @@ export async function runInitCommand(rawOptions: InitCommandOptions): Promise<vo
 			}
 
 			// Copy templates/iac/ to target directory
-			await copyIaCTemplate(projectPath);
+			await copyIaCTemplate(projectPath, projectName);
 
 			logger.blank();
 			console.log(chalk.bold(chalk.white(`  ✦ ${projectName}`)) + chalk.dim(" initialized"));

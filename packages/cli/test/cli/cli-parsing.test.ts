@@ -11,7 +11,8 @@ function findArg(cmd: ReturnType<typeof createProgram>, name: string) {
 }
 
 function findOpt(cmd: ReturnType<typeof createProgram>, name: string) {
-	return cmd.options.find((o) => o.name() === name || o.long === name);
+	const longName = name.startsWith("--") ? name : `--${name}`;
+	return cmd.options.find((o) => o.name() === name || o.long === longName);
 }
 
 describe("CLI argument parsing regression", () => {

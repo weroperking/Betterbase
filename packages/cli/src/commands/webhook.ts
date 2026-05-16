@@ -23,7 +23,7 @@ interface WebhookEntry {
 	enabled: boolean;
 }
 
-function generateWebhookId(): string {
+export function generateWebhookId(): string {
 	return `webhook-${Date.now().toString(36)}`;
 }
 

@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTestProject } from "../fixtures/fixtures";
 
@@ -40,6 +40,10 @@ export default defineSchema({
 	mkdirSync(nodeModulesPath, { recursive: true });
 	const coreTarget = join(__dirname, "../../../core");
 	const coreLink = join(nodeModulesPath, "core");
+	// Verify coreTarget exists before creating symlink
+	if (!existsSync(coreTarget) || !statSync(coreTarget).isDirectory()) {
+		throw new Error(`Core target directory not found at ${coreTarget}`);
+	}
 	if (!existsSync(coreLink)) {
 		symlinkSync(coreTarget, coreLink);
 	}

@@ -1,19 +1,34 @@
 import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import { apiRequest, requireAuth } from "../../src/utils/api-client";
 import { clearCredentials, saveCredentials, type Credentials } from "../../src/utils/credentials";
-import { existsSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CREDENTIALS_FILE = join(homedir(), ".betterbase", "credentials.json");
+// Use sandboxed temp directory for credentials
+const tempHomeDir = mkdtempSync(join(tmpdir(), "bb-api-client-test-"));
+const CREDENTIALS_FILE = join(tempHomeDir, ".betterbase", "credentials.json");
+
+// Save original BB_CREDENTIALS_DIR
+const originalBBCredentialsDir = process.env.BB_CREDENTIALS_DIR;
+
+// Set env var BEFORE importing the module
+process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
 
 function cleanupCredentialsFile() {
-  try {
-    if (existsSync(CREDENTIALS_FILE)) {
-      rmSync(CREDENTIALS_FILE);
-    }
-  } catch { /* ignore */ }
-}
+  	try {
+  		if (existsSync(CREDENTIALS_FILE)) {
+  			rmSync(CREDENTIALS_FILE);
+  		}
+  		rmSync(tempHomeDir, { recursive: true, force: true });
+  	} catch { /* ignore */ }
+  	// Restore original BB_CREDENTIALS_DIR
+  	if (originalBBCredentialsDir === undefined) {
+  		delete process.env.BB_CREDENTIALS_DIR;
+  	} else {
+  		process.env.BB_CREDENTIALS_DIR = originalBBCredentialsDir;
+  	}
+  }
 
 describe("api-client", () => {
   afterEach(cleanupCredentialsFile);

@@ -413,10 +413,9 @@ describe("RLS Test Command", () => {
           s.toUpperCase().includes("CREATE POLICY"),
         );
 
-        expect(policyStmts.length).toBe(1);
+        expect(policyStmts.length).toBe(2);
         expect(policyStmts[0]).toContain("FOR SELECT USING (");
-        expect(policyStmts[0]).toContain("FOR INSERT WITH CHECK (");
-        expect(policyStmts[0]).toContain(";");
+        expect(policyStmts[1]).toContain("FOR INSERT WITH CHECK (");
       } finally {
         proj.cleanup();
         restoreEnv(env);

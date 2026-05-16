@@ -734,19 +734,21 @@ describe("runWebhookCommand routing", () => {
 });
 
 describe("generateWebhookId", () => {
-  it("generateWebhookId creates ID with correct format", () => {
-    // Test the ID generator function directly via module internals
-    const id1 = `webhook-${Date.now().toString(36)}`;
-    expect(id1).toMatch(/^webhook-[0-9a-z]+$/);
+  it("generateWebhookId creates ID with correct format", async () => {
+    const { generateWebhookId } = await import("../../src/commands/webhook");
+    const id = generateWebhookId();
+    expect(id).toMatch(/^webhook-[0-9a-z]+$/);
   });
 
   it("IDs are unique across calls", async () => {
-    const id1 = `webhook-${Date.now().toString(36)}`;
+    const { generateWebhookId } = await import("../../src/commands/webhook");
+    const id1 = generateWebhookId();
     await new Promise(r => setTimeout(r, 10));
-    const id2 = `webhook-${Date.now().toString(36)}`;
+    const id2 = generateWebhookId();
     expect(id2).toMatch(/^webhook-[0-9a-z]+$/);
     expect(id2).not.toBe(id1);
-   });
+    expect(id2.localeCompare(id1)).toBeGreaterThan(0);
+  });
 });
 
 describe("runWebhookCreateCommand helpers", () => {
@@ -754,6 +756,7 @@ describe("runWebhookCreateCommand helpers", () => {
   let captured: ReturnType<typeof captureConsole>;
 
   afterEach(() => {
+    captured?.restore();
     if (projectRoot) cleanupProject(projectRoot);
   });
 

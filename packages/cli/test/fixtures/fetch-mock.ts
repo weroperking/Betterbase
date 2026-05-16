@@ -73,7 +73,7 @@ export const ADMIN_LOGIN_RESPONSE = {
 export const ADMIN_LOGIN_ERROR = { error: "Invalid credentials" };
 
 export function setupCredentialsFile(credentials: { token: string; admin_email: string; server_url: string }) {
-  const credentialsDir = join(tmpdir(), ".betterbase");
+  const credentialsDir = process.env.BB_CREDENTIALS_DIR || join(tmpdir(), ".betterbase");
   mkdirSync(credentialsDir, { recursive: true });
   const credentialsFile = join(credentialsDir, "credentials.json");
   writeFileSync(
