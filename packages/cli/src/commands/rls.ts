@@ -93,11 +93,9 @@ export default definePolicy('${table}', {
  */
 export async function runRlsCreate(table: string): Promise<void> {
 	if (!table) {
-		logger.error("Table name is required. Usage: bb rls create <table>");
-		process.exit(1);
+		throw new Error("Table name is required. Usage: bb rls create <table>");
 	}
 
-	// Sanitize table name
 	const sanitizedTable = table.replace(/[^a-zA-Z0-9_]/g, "_");
 
 	const projectRoot = process.cwd();
@@ -129,23 +127,22 @@ export async function runRlsList(): Promise<void> {
 		const policyFiles = findPolicyFiles(projectRoot);
 
 		if (policyFiles.length === 0) {
-			console.log(chalk.yellow("No RLS policies found."));
-			console.log(chalk.gray("Create one with: bb rls create <table>\n"));
+			logger.warn("No RLS policies found.");
+			logger.info("Create one with: bb rls create <table>\n");
 			return;
 		}
 
-		console.log(chalk.bold("\n📋 RLS Policies\n"));
+		logger.section("RLS Policies");
 
-		// Display in table format
-		console.log(chalk.gray(`${"Table".padEnd(20)}File`));
-		console.log(chalk.gray("-".repeat(50)));
+		console.log(chalk.dim(`${"Table".padEnd(20)}File`));
+		console.log(chalk.dim("-".repeat(50)));
 
 		for (const file of policyFiles) {
 			const table = file.replace(".policy.ts", "");
 			console.log(table.padEnd(20) + file);
 		}
 
-		console.log(chalk.gray(`\nTotal: ${policyFiles.length} policy file(s)\n`));
+		console.log(chalk.dim(`\nTotal: ${policyFiles.length} policy file(s)\n`));
 	} catch (error) {
 		logger.error(`Failed to list policies: ${error}`);
 	}
@@ -157,8 +154,7 @@ export async function runRlsList(): Promise<void> {
  */
 export async function runRlsDisable(table: string): Promise<void> {
 	if (!table) {
-		logger.error("Table name is required. Usage: bb rls disable <table>");
-		process.exit(1);
+		throw new Error("Table name is required. Usage: bb rls disable <table>");
 	}
 
 	const projectRoot = process.cwd();

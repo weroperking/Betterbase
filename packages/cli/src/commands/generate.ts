@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import * as logger from "../utils/logger";
-import { SchemaScanner, type TableInfo } from "../utils/schema-scanner";
+import { SchemaScanner, type TableInfo } from "../utils/scanner";
 import { withSpinner } from "../utils/spinner";
 import { runGenerateGraphqlCommand } from "./graphql";
 

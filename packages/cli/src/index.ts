@@ -9,7 +9,9 @@ import { runGenerateCrudCommand } from "./commands/generate";
 import { runGenerateGraphqlCommand, runGraphqlPlaygroundCommand } from "./commands/graphql";
 import { runIacAnalyze } from "./commands/iac/analyze";
 import { runIacExport } from "./commands/iac/export";
+import { runIacGenerate } from "./commands/iac/generate";
 import { runIacImport } from "./commands/iac/import";
+import { runIacSync } from "./commands/iac/sync";
 import { runInitCommand } from "./commands/init";
 import { isAuthenticated, runLoginCommand, runLogoutCommand } from "./commands/login";
 import {
@@ -41,18 +43,26 @@ const PUBLIC_COMMANDS = [
 	"-h",
 ];
 
+function extractCommandName(argv: string[]): string {
+	for (let i = 2; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg && !arg.startsWith("-")) {
+			return arg;
+		}
+	}
+	return "";
+}
+
 /**
  * Check if the user is authenticated before running a command.
  */
 async function checkAuthHook(): Promise<void> {
-	const commandName = process.argv[2];
+	const commandName = extractCommandName(process.argv);
 
-	// Skip auth check for public commands
-	if (PUBLIC_COMMANDS.includes(commandName)) {
+	if (!commandName || PUBLIC_COMMANDS.includes(commandName)) {
 		return;
 	}
 
-	// Check authentication status
 	const authenticated = await isAuthenticated();
 	if (!authenticated) {
 		logger.error(
@@ -226,6 +236,23 @@ export function createProgram(): Command {
 	const iac = program.command("iac").description("IaC (Infrastructure as Code) management");
 
 	iac
+		.command("sync")
+		.description("Sync IaC schema changes and generate Drizzle migration")
+		.argument("[project-root]", "project root directory", process.cwd())
+		.option("--force", "Apply destructive changes without confirmation")
+		.action(async (projectRoot: string, options: { force?: boolean }) => {
+			await runIacSync(projectRoot, { force: options.force });
+		});
+
+	iac
+		.command("generate")
+		.description("Generate API type definitions from betterbase/ functions")
+		.argument("[project-root]", "project root directory", process.cwd())
+		.action(async (projectRoot: string) => {
+			await runIacGenerate(projectRoot);
+		});
+
+	iac
 		.command("analyze")
 		.description("Run query diagnostics and analyze for performance issues")
 		.argument("[project-root]", "project root directory", process.cwd())
@@ -274,21 +301,21 @@ export function createProgram(): Command {
 		.description("Generate and apply migrations for local development");
 
 	migrate.action(async () => {
-		await runMigrateCommand({});
+		await runMigrateCommand({ projectRoot: process.cwd() });
 	});
 
 	migrate
 		.command("preview")
 		.description("Preview migration diff without applying changes")
 		.action(async () => {
-			await runMigrateCommand({ preview: true });
+			await runMigrateCommand({ preview: true, projectRoot: process.cwd() });
 		});
 
 	migrate
 		.command("production")
 		.description("Apply migrations to production (requires confirmation)")
 		.action(async () => {
-			await runMigrateCommand({ production: true });
+			await runMigrateCommand({ production: true, projectRoot: process.cwd() });
 		});
 
 	migrate

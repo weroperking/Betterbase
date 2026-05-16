@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { generateDrizzleConfig } from "@betterbase/core/config";
@@ -10,8 +11,32 @@ import { generateEnvContent, promptForProvider } from "../utils/provider-prompts
 /**
  * Copy the IaC template to the target directory
  */
-async function copyIaCTemplate(targetDir: string): Promise<void> {
-	const templateDir = path.join(import.meta.dir, "..", "..", "..", "templates", "iac");
+async function copyIaCTemplate(targetDir: string, projectName: string): Promise<void> {
+	// Try multiple possible template locations to support both development and production scenarios
+	const possibleTemplatePaths = [
+		// When installed globally and templates are copied to dist/templates (production)
+		path.join(import.meta.dir, "..", "..", "..", "..", "templates", "iac"),
+		// When running from built monorepo (packages/cli/dist -> betterbase/templates)
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+		// When running from monorepo source with one level of nesting
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+		// When running from monorepo source with betterbase/ subdirectory
+		path.join(import.meta.dir, "..", "..", "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
+	];
+
+	let templateDir: string | null = null;
+	for (const testPath of possibleTemplatePaths) {
+		if (existsSync(testPath)) {
+			templateDir = testPath;
+			break;
+		}
+	}
+
+	if (!templateDir) {
+		throw new Error(
+			`IaC template not found. Searched:\n${possibleTemplatePaths.map((p) => `  - ${p}`).join("\n")}`
+		);
+	}
 
 	// Check if template exists
 	try {
@@ -63,9 +88,23 @@ async function copyIaCTemplate(targetDir: string): Promise<void> {
 		try {
 			const content = await readFile(srcPath);
 			await writeFile(destPath, content);
-		} catch {
-			// Skip if file doesn't exist
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException | undefined)?.code;
+			if (code === "ENOENT") {
+				throw new Error(`Missing IaC template file: ${srcPath}`);
+			}
+			throw error;
 		}
+	}
+
+	// Inject the user-supplied project name into the copied package.json
+	const pkgPath = path.join(targetDir, "package.json");
+	try {
+		const pkgJson = JSON.parse(await readFile(pkgPath, "utf-8"));
+		pkgJson.name = projectName;
+		await writeFile(pkgPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
+	} catch {
+		// package.json absent from template — safe to skip
 	}
 
 	// Create .env file with multi-provider support
@@ -183,7 +222,7 @@ function getAuthDialect(provider: ProviderType): "sqlite" | "pg" | "mysql" {
 }
 
 async function installDependencies(projectPath: string): Promise<void> {
-	const installProcess = Bun.spawn(["bun", "install"], {
+	const installProcess = Bun.spawn([process.execPath, "install"], {
 		cwd: projectPath,
 		stdout: "inherit",
 		stderr: "inherit",
@@ -471,7 +510,7 @@ try {
   const sqlite = new Database(env.DB_PATH, { create: true });
   const db = drizzle(sqlite);
 
-  migrate(db, { migrationsFolder: './drizzle' });
+  await migrate(db, { migrationsFolder: './drizzle' });
   console.log('Migrations applied successfully.');
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -855,8 +894,57 @@ const s3 = new S3Client({
 ${endpointLine}
 });
 
-const BUCKET = process.env.STORAGE_BUCKET ?? ''
-`;
+const BUCKET = process.env.STORAGE_BUCKET ?? '';
+
+export const storageRoute = new Hono();
+
+// TODO: Replace with your production auth middleware before deploying
+storageRoute.use('*', async (c, next) => {
+  // Import auth middleware dynamically to avoid circular dependencies
+  try {
+    const { requireAuth } = await import('./middleware/auth');
+    return requireAuth(c, next);
+  } catch (e) {
+    // Fallback to simple bearer check for development
+    const authHeader = c.req.header('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    // In a real app, you would verify the token here
+    // For now, we'll just pass it through but log a warning
+    console.warn('Using fallback auth - replace with proper token verification');
+    await next();
+  }
+});
+
+storageRoute.put('/:key', async (c) => {
+  const key = c.req.param('key');
+  const body = await c.req.arrayBuffer();
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: Buffer.from(body),
+  }));
+  return c.json({ ok: true });
+});
+
+storageRoute.get('/:key', async (c) => {
+  const key = c.req.param('key');
+  const url = await getSignedUrl(s3, new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  }), { expiresIn: 3600 });
+  return c.json({ url });
+});
+
+storageRoute.delete('/:key', async (c) => {
+  const key = c.req.param('key');
+  await s3.send(new DeleteObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  }));
+  return c.json({ ok: true });
+});`;
 }
 
 async function writeProjectFiles(
@@ -1347,7 +1435,7 @@ export async function runInitCommand(rawOptions: InitCommandOptions): Promise<vo
 			}
 
 			// Copy templates/iac/ to target directory
-			await copyIaCTemplate(projectPath);
+			await copyIaCTemplate(projectPath, projectName);
 
 			logger.blank();
 			console.log(chalk.bold(chalk.white(`  ✦ ${projectName}`)) + chalk.dim(" initialized"));

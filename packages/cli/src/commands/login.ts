@@ -1,36 +1,11 @@
 import chalk from "chalk";
-import type { Command } from "commander";
 import { clearCredentials, loadCredentials, saveCredentials } from "../utils/credentials";
 import { blank, box, error, keyValue, section, success, sym } from "../utils/logger";
 import { createSpinner } from "../utils/spinner";
 
 const DEFAULT_SERVER_URL = "https://api.betterbase.io";
 const POLL_INTERVAL_MS = 5000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
-export function registerLoginCommand(program: Command) {
-	program
-		.command("login")
-		.description("Authenticate with a Betterbase instance")
-		.option("--url <url>", "Self-hosted Betterbase server URL", DEFAULT_SERVER_URL)
-		.option("--email <email>", "Admin email (for API key login)")
-		.option("--password <password>", "Admin password (for API key login)")
-		.action(async (opts) => {
-			if (opts.email && opts.password) {
-				await runApiKeyLogin({ serverUrl: opts.url, email: opts.email, password: opts.password });
-			} else {
-				await runLoginCommand({ serverUrl: opts.url });
-			}
-		});
-
-	program
-		.command("logout")
-		.description("Clear stored credentials")
-		.action(() => {
-			clearCredentials();
-			success("Logged out.");
-		});
-}
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 export async function runLoginCommand(opts: { serverUrl?: string } = {}) {
 	const serverUrl = (opts.serverUrl ?? DEFAULT_SERVER_URL).replace(/\/$/, "");
@@ -68,12 +43,27 @@ export async function runLoginCommand(opts: { serverUrl?: string } = {}) {
 		process.exit(1);
 	}
 
+	const fullVerificationUri = `${verificationUri}?code=${userCode}`;
+
 	keyValue("Instance", serverUrl);
 	keyValue("Your code", chalk.bold(chalk.yellow(userCode)));
 	blank();
-	console.log(`  ${chalk.dim("Open:")} ${chalk.cyan(`${verificationUri}?code=${userCode}`)}`);
+	console.log(`  ${chalk.dim("Open:")} ${chalk.cyan(fullVerificationUri)}`);
 	blank();
-	console.log(chalk.dim("  Waiting for browser authorization") + chalk.dim(" (5 min timeout)..."));
+
+	// Try to open the browser automatically
+	try {
+		if (process.platform === "darwin") {
+			await Bun.spawn(["open", fullVerificationUri]);
+		} else if (process.platform === "win32") {
+			await Bun.spawn(["cmd", "/c", "start", fullVerificationUri]);
+		} else {
+			await Bun.spawn(["xdg-open", fullVerificationUri]);
+		}
+		console.log(chalk.dim("  Browser opened. Waiting for authorization..."));
+	} catch {
+		console.log(chalk.dim("  Waiting for browser authorization") + chalk.dim(" (5 min timeout)..."));
+	}
 
 	// Step 2: Poll for token
 	const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -179,11 +169,6 @@ export async function runApiKeyLogin(opts: {
 		}
 		process.exit(1);
 	}
-}
-
-// Legacy exports for compatibility
-export async function runLoginCommandLegacy(): Promise<void> {
-	await runLoginCommand({});
 }
 
 export async function runLogoutCommand(): Promise<void> {

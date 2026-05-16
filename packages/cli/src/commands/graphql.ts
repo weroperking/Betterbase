@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as logger from "../utils/logger";
-import { SchemaScanner } from "../utils/schema-scanner";
+import { SchemaScanner } from "../utils/scanner";
 
 /**
  * Type for Drizzle table objects - using a generic approach to avoid type issues

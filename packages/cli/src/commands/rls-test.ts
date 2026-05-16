@@ -239,8 +239,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 	// Check database type
 	const dbType = getDatabaseType();
 	if (dbType !== "postgresql") {
-		logger.error(`RLS testing is only supported for PostgreSQL databases. Current: ${dbType}`);
-		process.exit(1);
+		throw new Error(`RLS testing is only supported for PostgreSQL databases. Current: ${dbType}`);
 	}
 
 	// Get database connection
@@ -257,8 +256,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 		`;
 
 		if (tableCheck.length === 0) {
-			logger.error(`Table "${tableName}" not found in public schema`);
-			process.exit(1);
+			throw new Error(`Table "${tableName}" not found in public schema`);
 		}
 
 		// Check if RLS is enabled on the source table
@@ -496,7 +494,8 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 
 			// Exit with error code if any tests failed
 			if (failedCount > 0) {
-				process.exit(1);
+				logger.error(`RLS tests: ${passedCount} passed, ${failedCount} failed`);
+				throw new Error(`${failedCount} RLS test(s) failed`);
 			}
 		} finally {
 			// Cleanup: Drop test schema

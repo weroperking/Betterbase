@@ -121,11 +121,19 @@ export async function runDevCommand(projectRoot: string) {
 
 	// --- Graceful shutdown ---
 	process.on("SIGINT", async () => {
-		await shutdown();
+		try {
+			await shutdown();
+		} catch (e) {
+			warn(`Shutdown error: ${e instanceof Error ? e.message : String(e)}`);
+		}
 		process.exit(0);
 	});
 	process.on("SIGTERM", async () => {
-		await shutdown();
+		try {
+			await shutdown();
+		} catch (e) {
+			warn(`Shutdown error: ${e instanceof Error ? e.message : String(e)}`);
+		}
 		process.exit(0);
 	});
 

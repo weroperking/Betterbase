@@ -478,7 +478,10 @@ export default function TeamPage() {
 								assignRoleMutation.mutate({
 									admin_id: formData.get("admin_id") as string,
 									role_id: formData.get("role_id") as string,
-									project_id: (formData.get("project_id") as string) || undefined,
+									project_id:
+									(formData.get("project_id") as string) === "__global__"
+										? undefined
+										: (formData.get("project_id") as string) || undefined,
 								});
 							}}
 						>
@@ -520,7 +523,7 @@ export default function TeamPage() {
 											<SelectValue placeholder="Global (no scope)" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="">Global (no scope)</SelectItem>
+											<SelectItem value="__global__">Global (no scope)</SelectItem>
 											{projectsData?.projects?.map((p) => (
 												<SelectItem key={p.id} value={p.id}>
 													{p.name}

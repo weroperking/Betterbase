@@ -183,8 +183,13 @@ export default function OverviewPage() {
 						<h2 className="text-sm font-medium mb-4" style={{ color: "var(--color-text-primary)" }}>
 							Recent Activity
 						</h2>
-						<div className="space-y-3">
-							{(auditData?.logs ?? []).map((log: any) => (
+					<div className="space-y-3">
+						{(auditData?.logs ?? []).length === 0 ? (
+							<div className="text-center py-6 text-xs" style={{ color: "var(--color-text-muted)" }}>
+								No recent activity yet.
+							</div>
+						) : (
+							(auditData?.logs ?? []).map((log: any) => (
 								<div key={log.id} className="flex items-start gap-2.5 text-xs">
 									<div
 										className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
@@ -208,8 +213,9 @@ export default function OverviewPage() {
 										{formatRelative(log.created_at)}
 									</span>
 								</div>
-							))}
-						</div>
+							))
+						)}
+					</div>
 					</div>
 				</div>
 			</div>

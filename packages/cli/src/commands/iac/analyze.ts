@@ -16,7 +16,7 @@ export async function runIacAnalyze(
 ): Promise<void> {
 	const betterbaseDir = join(projectRoot, "betterbase");
 
-	if (!statSync(betterbaseDir).isDirectory()) {
+	if (!existsSync(betterbaseDir) || !statSync(betterbaseDir).isDirectory()) {
 		logger.error("No betterbase/ directory found. Run this from a BetterBase project.");
 		return;
 	}
@@ -48,9 +48,10 @@ interface QueryAnalysis {
 
 function scanQueries(betterbaseDir: string): string[] {
 	const queriesDir = join(betterbaseDir, "queries");
-	const files: string[] = [];
-
+	if (!existsSync(queriesDir)) return [];
 	if (!statSync(queriesDir).isDirectory()) return [];
+
+	const files: string[] = [];
 
 	function walk(dir: string) {
 		for (const entry of readdirSync(dir)) {

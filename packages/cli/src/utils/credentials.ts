@@ -3,8 +3,9 @@ import { homedir } from "os";
 import { join } from "path";
 import { z } from "zod";
 
-const CREDENTIALS_DIR = join(homedir(), ".betterbase");
-const CREDENTIALS_FILE = join(CREDENTIALS_DIR, "credentials.json");
+// Allow override for testing
+const getCredentialsDir = () => process.env.BB_CREDENTIALS_DIR || join(homedir(), ".betterbase");
+const CREDENTIALS_FILE = () => join(getCredentialsDir(), "credentials.json");
 
 const CredentialsSchema = z.object({
 	token: z.string(),
@@ -16,16 +17,17 @@ const CredentialsSchema = z.object({
 export type Credentials = z.infer<typeof CredentialsSchema>;
 
 export function saveCredentials(creds: Credentials): void {
+	const CREDENTIALS_DIR = getCredentialsDir();
 	if (!existsSync(CREDENTIALS_DIR)) {
 		mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
 	}
-	writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 });
+	writeFileSync(CREDENTIALS_FILE(), JSON.stringify(creds, null, 2), { mode: 0o600 });
 }
 
 export function loadCredentials(): Credentials | null {
-	if (!existsSync(CREDENTIALS_FILE)) return null;
+	if (!existsSync(CREDENTIALS_FILE())) return null;
 	try {
-		const raw = JSON.parse(readFileSync(CREDENTIALS_FILE, "utf-8"));
+		const raw = JSON.parse(readFileSync(CREDENTIALS_FILE(), "utf-8"));
 		return CredentialsSchema.parse(raw);
 	} catch {
 		return null;
@@ -33,12 +35,13 @@ export function loadCredentials(): Credentials | null {
 }
 
 export function clearCredentials(): void {
-	if (existsSync(CREDENTIALS_FILE)) {
-		writeFileSync(CREDENTIALS_FILE, JSON.stringify({}));
+	if (existsSync(CREDENTIALS_FILE())) {
+		writeFileSync(CREDENTIALS_FILE(), JSON.stringify({}));
 	}
 }
 
 export function getServerUrl(): string {
 	const creds = loadCredentials();
-	return creds?.server_url ?? "https://api.betterbase.io"; // Falls back to cloud
+	let url = creds?.server_url ?? "https://api.betterbase.io";
+	return url.replace(/\/+$/, ""); // Remove trailing slashes
 }

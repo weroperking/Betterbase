@@ -7,7 +7,6 @@
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { type BetterBaseConfig, parseConfig } from "@betterbase/core/config";
 import {
 	type StorageConfig,
 	type StorageObject,
@@ -17,6 +16,7 @@ import {
 } from "@betterbase/core/storage";
 import inquirer from "inquirer";
 import * as logger from "../utils/logger";
+import { findConfigFile, loadConfig } from "../utils/config";
 
 /**
  * Supported storage provider types
@@ -33,51 +33,6 @@ interface StorageCredentials {
 /**
  * Find and load the BetterBase config file
  */
-async function findConfigFile(projectRoot: string): Promise<string | null> {
-	const configPaths = [
-		path.join(projectRoot, "betterbase.config.ts"),
-		path.join(projectRoot, "betterbase.config.js"),
-		path.join(projectRoot, "betterbase.config.mts"),
-	];
-
-	for (const configPath of configPaths) {
-		if (fsExistsSync(configPath)) {
-			return configPath;
-		}
-	}
-
-	return null;
-}
-
-/**
- * Load and parse the BetterBase config
- */
-async function loadConfig(projectRoot: string): Promise<BetterBaseConfig | null> {
-	const configPath = await findConfigFile(projectRoot);
-
-	if (!configPath) {
-		return null;
-	}
-
-	try {
-		// Dynamic import for ESM modules
-		const configModule = await import(configPath);
-		const config = configModule.default || configModule;
-
-		if (config && typeof config === "object") {
-			const parseResult = parseConfig(config);
-			if (parseResult.success) {
-				return parseResult.data;
-			}
-		}
-
-		return null;
-	} catch (error) {
-		logger.warn(`Failed to load config: ${error instanceof Error ? error.message : String(error)}`);
-		return null;
-	}
-}
-
 /**
  * Get storage config from environment variables
  */
