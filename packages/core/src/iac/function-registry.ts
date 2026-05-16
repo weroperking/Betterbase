@@ -1,4 +1,4 @@
-import { extname, join, relative } from "path";
+import { extname, join, relative } from "node:path";
 import { readdir } from "fs/promises";
 
 export interface RegisteredFunction {

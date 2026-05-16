@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
-import { join, relative } from "path";
+import { join } from "path";
+import path from "node:path";
 import chalk from "chalk";
 import { ContextGenerator } from "../utils/context-generator";
 import { blank, error, info, keyValue, sym, warn } from "../utils/logger";
@@ -57,7 +58,7 @@ export async function runDevCommand(projectRoot: string) {
 	const watcher = new DevWatcher({ debounceMs: 150 });
 
 	watcher.on(async (event) => {
-		const label = chalk.dim(relative(projectRoot, event.path));
+		const label = chalk.dim(path.relative(projectRoot, event.path));
 
 		switch (event.kind) {
 			case "schema": {

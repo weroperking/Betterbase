@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { extname, join } from "node:path";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import path, { extname, join } from "node:path";
 import * as logger from "../../utils/logger";
 
 export interface IacAnalyzeOptions {
@@ -70,7 +70,7 @@ function scanQueries(betterbaseDir: string): string[] {
 
 function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 	const content = readFileSync(filePath, "utf-8");
-	const path = relative(betterbaseDir, filePath);
+	const relPath = path.relative(betterbaseDir, filePath).replace(/\.(ts|js)$/, "");
 
 	const issues: string[] = [];
 	const suggestions: string[] = [];
@@ -100,7 +100,7 @@ function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 		suggestions.push("Consider using raw SQL execute() for complex joins");
 	}
 
-	return { path, complexity, issues, suggestions };
+	return { path: relPath, complexity, issues, suggestions };
 }
 
 function printTable(results: QueryAnalysis[]) {
