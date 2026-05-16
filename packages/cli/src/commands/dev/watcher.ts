@@ -35,12 +35,12 @@ export class DevWatcher {
 			{ path: join(projectRoot, "src"), recursive: true },
 		];
 
-		for (const { path, recursive } of dirs) {
-			if (!existsSync(path)) continue;
+		for (const { path: dirPath, recursive } of dirs) {
+			if (!existsSync(dirPath)) continue;
 
-			const w = watch(path, { recursive }, (event, filename) => {
+			const w = watch(dirPath, { recursive }, (event, filename) => {
 				if (!filename) return;
-				const fullPath = join(path, String(filename));
+				const fullPath = join(dirPath, String(filename));
 				const rel = path.relative(projectRoot, fullPath);
 
 				if (rel.includes("_generated")) return; // never watch generated files

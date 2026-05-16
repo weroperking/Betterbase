@@ -27,7 +27,7 @@ export async function runIacAnalyze(
 	const results: QueryAnalysis[] = [];
 
 	for (const q of queries) {
-		const analysis = analyzeQuery(q);
+		const analysis = analyzeQuery(q, betterbaseDir);
 		results.push(analysis);
 	}
 
@@ -67,9 +67,9 @@ function scanQueries(betterbaseDir: string): string[] {
 	return files;
 }
 
-function analyzeQuery(filePath: string): QueryAnalysis {
+function analyzeQuery(filePath: string, betterbaseDir: string): QueryAnalysis {
 	const content = readFileSync(filePath, "utf-8");
-	const relativePath = filePath.replace(join(process.cwd(), "betterbase/"), "");
+	const relPath = path.relative(betterbaseDir, filePath).replace(/\.(ts|js)$/, "");
 
 	const issues: string[] = [];
 	const suggestions: string[] = [];
@@ -99,7 +99,7 @@ function analyzeQuery(filePath: string): QueryAnalysis {
 		suggestions.push("Consider using raw SQL execute() for complex joins");
 	}
 
-	return { path: relativePath, complexity, issues, suggestions };
+	return { path: relPath, complexity, issues, suggestions };
 }
 
 function printTable(results: QueryAnalysis[]) {
