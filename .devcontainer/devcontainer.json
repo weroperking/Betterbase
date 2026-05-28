@@ -8,7 +8,10 @@
 	},
 	"customizations": {
 		"vscode": {
-			"extensions": ["oven.bun-vscode"]
+			"extensions": [
+				"oven.bun-vscode",
+				"willasm.obsidian-md-vsc"
+			]
 		}
 	}
 }
