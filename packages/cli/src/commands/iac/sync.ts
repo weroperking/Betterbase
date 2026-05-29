@@ -7,10 +7,18 @@ import chalk from "chalk";
 import { mkdir, readdir, writeFile } from "fs/promises";
 import { done, error, info, section, success, sym, warn } from "../../utils/logger";
 import { withSpinner } from "../../utils/spinner";
+import { detectEnvironmentConfig } from "./env-detector";
+import { syncWithServer } from "./server-sync";
 
 export async function runIacSync(
 	projectRoot: string,
-	opts: { force?: boolean; silent?: boolean } = {},
+	opts: { 
+		force?: boolean; 
+		silent?: boolean;
+		headless?: boolean;          // NEW: Skip interactive prompts
+		autoRegister?: boolean;      // NEW: Auto-register with server
+		environment?: string;        // NEW: Target environment
+	} = {},
 ) {
 	const startTime = Date.now();
 	const betterbaseDir = join(projectRoot, "betterbase");
@@ -90,6 +98,31 @@ export async function runIacSync(
 	await writeFile(join(migrDir, migration.filename), migration.sql);
 	if (!opts.silent) info(`Migration written: ${migration.filename}`);
 
+	// 4. HEADLESS SYNC: Auto-sync with server
+	if (opts.headless || opts.autoRegister) {
+		if (!opts.silent) {
+			section("Headless Sync");
+			info("Synchronizing with @betterbase/server...");
+		}
+		
+		// Load and validate schema
+		const schema = await loadSerializedSchema(prevFile);
+		
+		// Detect environment configuration
+		const envConfig = await detectEnvironmentConfig(projectRoot);
+		
+		// Sync with server
+		await syncWithServer(projectRoot, {
+			schema,
+			envConfig,
+			environment: opts.environment ?? 'local',
+			force: opts.force,
+		});
+		
+		if (!opts.silent) success("Headless sync complete.");
+	}
+
+	// 5. Apply migration locally (existing logic)
 	if (opts.silent) {
 		const drizzleCode = generateDrizzleSchema(current, "postgres");
 		await writeFile(drizzleOut, drizzleCode);

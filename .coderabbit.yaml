@@ -1,530 +1,225 @@
 # .coderabbit.yaml
-# BetterBase — CodeRabbit Configuration
-# Tuned for: Bun + Hono + Drizzle + BetterAuth + Turborepo monorepo
-# Solo dev + AI agent (Kilo Code) workflow
+# BetterBase CodeRabbit Configuration
+# Stack: Bun + Hono + Drizzle + BetterAuth + Turborepo monorepo
 
 language: "en-US"
-
-tone_instructions: "Be direct, dense, and technical. Skip encouragement. Flag real issues only. Prioritize security, correctness, and architectural consistency over style. When something is fine, say nothing."
-
-early_access: true
+tone_instructions: "Direct, technical. Flag real issues only. Prioritize security, correctness, and architectural consistency over style."
 
 reviews:
   profile: "assertive"
   request_changes_workflow: true
   high_level_summary: true
-  high_level_summary_placeholder: "@coderabbitai summary"
-  auto_title_placeholder: "@coderabbitai"
   poem: false
-  collapse_walkthrough: false
   sequence_diagrams: true
 
   path_filters:
     - "!**/node_modules/**"
     - "!**/dist/**"
     - "!**/.turbo/**"
-    - "!**/bun.lock"
     - "!**/*.lock"
     - "!**/coverage/**"
     - "!**/.betterbase-context.json"
 
   path_instructions:
-    # ── Server package (self-hosted core) ─────────────────────────────────────
     - path: "packages/server/**"
       instructions: |
-        This is the self-hosted BetterBase server (@betterbase/server). It runs as a single
-        Hono process on Bun. Key invariants to enforce:
+        Self-hosted BetterBase server. Security invariants:
+        - All /admin/* routes (except /admin/auth/login/setup/logout) require requireAdmin middleware
+        - /admin/auth/setup returns 410 if any admin exists (one-time bootstrap)
+        - Admin keys SHA-256 hashed before storage, plaintext returned once only
+        - JWT uses HS256 via jose, BETTERBASE_JWT_SECRET >= 32 chars
+        - bcrypt rounds = 12
+        - API key prefix: bb_live_, last_used_at is fire-and-forget
+        - betterbase_meta.audit_log: write-only, no update/delete routes ever
+        - All Postgres queries use singleton pool from db.ts
+        - Migrations: NNN_description.sql format, idempotent, no gaps
+        - Per-project schemas: project_{slug} with pg parameterized queries
+        - Request logging: fire-and-forget (.catch(() => {}))
+        - Audit log writes: fire-and-forget
+        - Webhook delivery log (logWebhookDelivery): awaited
+        - Function invocation log (logFunctionInvocation): awaited
+        - Hono routes: validate with @hono/zod-validator, don't throw in handlers
 
-        SECURITY — non-negotiable:
-        - All routes under /admin/* (except /admin/auth/login, /admin/auth/setup,
-          /admin/auth/logout) MUST go through the requireAdmin middleware from
-          packages/server/src/lib/admin-middleware.ts. Never add an unprotected admin route.
-        - /admin/auth/setup MUST return 410 Gone if any admin user already exists. This is
-          a one-time bootstrap endpoint. If this check is missing, flag as critical.
-        - Admin keys (project admin_key) are SHA-256 hashed before storage. The plaintext
-          is returned ONCE at creation and never stored. Flag any route that stores or
-          returns a raw key beyond the creation response.
-        - JWT uses HS256 via `jose`. Never switch to RS256 unless explicitly discussed.
-          BETTERBASE_JWT_SECRET must be at least 32 chars — enforced by env.ts Zod schema.
-        - bcrypt rounds = 12. Never lower this for "performance" in production paths.
-        - API key auth: prefix is `bb_live_`. Keys are SHA-256 hashed. last_used_at is
-          fire-and-forget. Never await the last_used_at update.
-        - Audit log (betterbase_meta.audit_log): write-only. There must be NO update or
-          delete routes for this table. Ever. Flag any mutation.
-
-        DATABASE:
-        - All Postgres queries use the singleton pool from packages/server/src/lib/db.ts.
-          Never create a new Pool inline.
-        - Migration files must be named NNN_description.sql (e.g. 005_...) and applied
-          in alphabetical order by the migration runner. Gaps in numbering will cause
-          bugs — flag them.
-        - Per-project schemas are named project_{slug}. The slug comes from
-          betterbase_meta.projects.slug which is constrained to [a-z0-9-]. Dynamic schema
-          queries must use pg parameterized queries or pg format — never string interpolation
-          with user input.
-        - betterbase_meta.provision_project_schema() must be called on project creation.
-          Flag any project POST handler that omits it.
-
-        FIRE-AND-FORGET vs AWAIT:
-        - Request logging middleware: fire-and-forget (.catch(() => {})). Never await.
-        - Audit log writes: fire-and-forget. Never await.
-        - last_used_at updates on API keys: fire-and-forget. Never await.
-        - Webhook delivery log (logWebhookDelivery): MUST be awaited. Callers need
-          confirmation it was logged. Flag if not awaited.
-        - Function invocation log (logFunctionInvocation): MUST be awaited.
-
-        HONO PATTERNS:
-        - All request bodies validated with @hono/zod-validator before handler logic.
-          Never access c.req.json() directly in a handler that should be validated.
-        - Route handlers must not throw — errors should be caught and return c.json({error}).
-          The global onError handler catches the rest but shouldn't be the primary mechanism.
-
-        ENVIRONMENT:
-        - All env access goes through validateEnv() in src/lib/env.ts. Never access
-          process.env directly in route handlers or lib modules outside of env.ts and db.ts.
-
-    # ── CLI package ───────────────────────────────────────────────────────────
     - path: "packages/cli/**"
       instructions: |
-        This is the @betterbase/cli package — the `bb` command-line tool.
+        CLI package. Critical invariants:
+        - init MUST be in PUBLIC_COMMANDS (["login", "init", "--version", "--help", "-V", "-h"])
+        - Never use "bun" string in spawn() - use process.execPath
+        - All authenticated commands use apiRequest() from utils/api-client.ts
+        - Credentials at ~/.betterbase/credentials.json with mode 0o700/0o600
+        - login uses OAuth 2.0 device flow (POST /device/code → browser → poll /device/token)
 
-        CRITICAL PATTERNS:
-        - init MUST be in PUBLIC_COMMANDS. If it's removed or missing, bb init breaks for
-          new users who aren't logged in. This is a documented critical bug pattern.
-          Check packages/cli/src/index.ts whenever it's modified.
-        - PUBLIC_COMMANDS must contain at minimum: ["login", "init", "--version", "--help",
-          "-V", "-h"]. Flag any PR that removes from this list without explicit justification.
-        - Never use "bun" as a string in spawn() calls. Always use process.execPath.
-          Reason: PATH may not have bun when running global installs. This is a documented
-          invariant in this codebase.
-
-        API CALLS:
-        - All authenticated CLI commands must use apiRequest() from
-          packages/cli/src/utils/api-client.ts. Never call fetch() directly with a
-          hardcoded URL in a command handler.
-        - apiRequest() reads server_url from credentials via loadCredentials(). This
-          supports both cloud and self-hosted targets.
-        - requireAuth() in api-client.ts must exit(1) with a clear message if not logged in.
-
-        CREDENTIALS:
-        - Credentials stored at ~/.betterbase/credentials.json.
-        - Credentials schema MUST include server_url (added in SH-18). Any credential
-          write that omits server_url breaks self-hosted mode.
-        - saveCredentials() must set directory mode 0o700 and file mode 0o600.
-
-        BB LOGIN:
-        - Uses OAuth 2.0 device flow (POST /device/code → browser verify → poll /device/token).
-        - --url flag targets self-hosted instances. Default is https://api.betterbase.io.
-        - Poll interval: 5s. Timeout: 5 minutes. Both are constants — don't inline magic numbers.
-        - 202 response from /device/token means authorization_pending — keep polling.
-
-        OFFLINE INIT:
-        - bb init creates local-only projects with nanoid. No network call required.
-        - bb sync registers them with the backend. These are intentionally decoupled.
-
-    # ── Core package ──────────────────────────────────────────────────────────
     - path: "packages/core/**"
       instructions: |
-        This is @betterbase/core — the engine that powers BetterBase projects.
+        @betterbase/core engine. Invariants:
+        - All DB queries type-safe through Drizzle, raw SQL only in migrations/RLS
+        - Relations defined with drizzle-orm relations()
+        - Auth schema tables match BetterAuth adapter expectations
+        - RLS via definePolicy() only
+        - auth.uid() required before RLS policies
+        - S3 adapter uses forcePathStyle: true
+        - WebSocket via Bun native API, polling over SSE for log streams
 
-        DRIZZLE ORM:
-        - All database queries must be type-safe through Drizzle. No raw SQL strings
-          in core except where absolutely necessary (migrations, RLS policy application).
-        - Relations must be defined with drizzle-orm relations() — not inferred from
-          foreign keys alone. Flag missing relation definitions.
-        - Schema changes that add new columns must be accompanied by a Drizzle migration.
-          Never mutate the schema without a migration.
-
-        BETTERAUTH:
-        - Auth schema tables (user, session, account, verification) must match the
-          BetterAuth adapter expectations exactly. Column renames or type changes break auth.
-        - The auth schema in provision_project_schema() in packages/server must stay in
-          sync with the template in packages/core. Flag divergence.
-
-        RLS (Row Level Security):
-        - definePolicy() is the only way to create RLS policies. Never write raw SQL
-          policy strings in application code.
-        - auth.uid() function must exist in the DB before any RLS policy is applied.
-          applyAuthFunction() from migration/rls-migrator.ts handles this.
-        - evaluatePolicy() is SQLite-compatible. PostgreSQL uses native RLS via migration.
-          Don't confuse the two paths.
-
-        STORAGE:
-        - S3 adapter always uses forcePathStyle: true for MinIO compatibility.
-        - Never hardcode credentials — always read from StorageConfig.
-
-        WEBHOOKS:
-        - Webhook payloads are HMAC-SHA256 signed via signer.ts. The secret is user-provided.
-        - Dispatcher uses fire-and-forget with retry (max 3 attempts, exponential backoff).
-        - logWebhookDelivery must be called on every delivery attempt — success or failure.
-
-        REALTIME:
-        - WebSocket-based via Bun native WS API. No socket.io.
-        - Polling over SSE is the chosen pattern for live log streams — chosen explicitly
-          for Docker self-hosted compatibility. Do not suggest switching to SSE.
-
-        SERVERLESS FUNCTIONS:
-        - Functions target Cloudflare Workers or Vercel Edge. Bundler uses Bun build API.
-        - Never use Node.js-only APIs in function templates. Edge runtime only.
-
-    # ── Client SDK ────────────────────────────────────────────────────────────
     - path: "packages/client/**"
       instructions: |
-        This is @betterbase/client — the TypeScript SDK for frontend/application use.
+        Client SDK. Invariants:
+        - All async operations return { data, error }, never throw
+        - QueryBuilder is chainable and lazy (.execute() triggers call)
+        - OAuth redirects, doesn't return data
+        - getPublicUrl() is sync, createSignedUrl() is async
+        - Realtime: WebSocket with exponential backoff reconnection
 
-        API DESIGN:
-        - All async operations return { data, error } — never throw. This is the
-          Supabase-compatible pattern intentionally adopted. Any method that throws
-          instead of returning an error object is a breaking API change.
-        - QueryBuilder is chainable and lazy — .execute() triggers the network call.
-          Never eagerly fetch in a chain method.
-
-        AUTH:
-        - Auth client wraps BetterAuth. Session token stored in localStorage by default.
-        - onAuthStateChange callback must fire on both sign-in and sign-out.
-        - signInWithOAuth redirects — it does not return data. Flag any code that
-          tries to read .data from an OAuth sign-in result.
-
-        REALTIME:
-        - RealtimeClient uses WebSocket with exponential backoff reconnection.
-        - unsubscribe() must clean up the WS connection if it's the last subscriber.
-
-        STORAGE:
-        - getPublicUrl() is synchronous (no network call) — it constructs the URL from config.
-        - createSignedUrl() IS async — it calls the server. Don't confuse these two.
-
-        VERSIONING:
-        - Package starts at 0.1.0. Never bump major version without explicit discussion.
-
-    # ── Shared package ────────────────────────────────────────────────────────
     - path: "packages/shared/**"
       instructions: |
-        This is @betterbase/shared — imported by all other packages.
-        Changes here have monorepo-wide impact.
+        Shared types. Invariants:
+        - Backward-compatible types only (additive changes)
+        - Error classes extend BetterBaseError
+        - IDs use nanoid, never Math.random() or Date.now()
 
-        - Types must be backward-compatible. Adding optional fields is fine.
-          Removing or renaming fields is a breaking change across all packages.
-        - Error classes extend BetterBaseError. Never use plain Error in shared code.
-        - generateId() uses nanoid. Never use Math.random() or Date.now() for IDs.
-        - Constants (VERSION, DEFAULT_PORT, etc.) are the single source of truth.
-          Never duplicate them in package-local files.
-
-    # ── Dashboard (apps/dashboard) ────────────────────────────────────────────
     - path: "apps/dashboard/**"
       instructions: |
-        This is the React admin dashboard for BetterBase self-hosted instances.
+        React admin dashboard. Stack: React Router v7, TanStack Query v5, Tailwind CSS v4, shadcn/ui.
+        Invariants:
+        - All server calls via src/lib/api.ts
+        - Query keys from src/lib/query-keys.ts (QK factory)
+        - staleTime: 30s default, refetchInterval: 30s for metrics/health
+        - useMutation onSuccess: queryClient.invalidateQueries(QK.key)
+        - Forms: React Hook Form + Zod resolver
+        - Destructive actions: ConfirmDialog with typed resource name
+        - Colors: CSS variables only (var(--color-*))
+        - Empty/Loading states required for list views
+        - AuthGuard uses localStorage bb_token, redirects to /login
+        - Query params: useSearchParams, not useState
 
-        STACK (locked — do not substitute):
-        React Router v7, TanStack Query v5, Tailwind CSS v4, shadcn/ui,
-        Motion (framer-motion v11), TanStack Table v8, React Hook Form v7 + Zod,
-        Recharts, Lucide React.
-
-        API CLIENT:
-        - All server calls go through src/lib/api.ts. Never use fetch() directly in
-          a page or component.
-        - 401 response must clear token and redirect to /login. This is handled in
-          api.ts request(). Don't add separate 401 handling in components.
-        - VITE_API_URL is the only env var. Never hardcode localhost:3001 in component code.
-
-        TANSTACK QUERY:
-        - Query keys come from src/lib/query-keys.ts (the QK factory). Never write
-          inline string arrays as query keys — they can't be invalidated reliably.
-        - staleTime: 30s default. refetchInterval where needed (metrics: 30s, health: 30s).
-        - useMutation onSuccess must call queryClient.invalidateQueries with the
-          relevant QK key. Stale UI after mutation is a bug.
-
-        FORMS:
-        - All forms use React Hook Form + Zod resolver. Never use uncontrolled inputs
-          or useState for form state in data-entry forms.
-        - Destructive actions (delete, ban) require ConfirmDialog with the resource name
-          typed. This is a UX invariant. Flag any delete button without this guard.
-
-        DESIGN TOKENS:
-        - Colors only via CSS variables (var(--color-*)). Never hardcode hex values
-          in component JSX or className strings.
-        - Dark theme is default. Light theme via [data-theme="light"] on html element.
-
-        EMPTY & LOADING STATES:
-        - Every list view needs an EmptyState component. No blank pages.
-        - Loading states use skeleton components, not spinners.
-        - Every page-level component must be wrapped in ErrorBoundary.
-
-        AUTH:
-        - AuthGuard checks localStorage for bb_token. Redirects to /login if absent.
-        - SetupGuard checks /admin/auth/setup — redirects to /login on 410.
-        - Never access bb_token directly in components — use getToken() from api.ts.
-
-        ROUTING:
-        - All routes registered in src/routes.tsx. Pages are lazy-loaded.
-        - Query params (search, pagination, filters) synced to URL via useSearchParams.
-          Never use useState for filter state that should be bookmarkable.
-
-    # ── Migrations ────────────────────────────────────────────────────────────
     - path: "packages/server/migrations/**"
       instructions: |
-        Migration files are sequential and irreversible once deployed.
-
-        NAMING: Must be NNN_description.sql. Gaps are bugs — the migration runner applies
-        in alphabetical order. If 005 exists and a new file is 007, flag — 006 is missing.
-
-        CONTENT RULES:
-        - Always use IF NOT EXISTS / IF EXISTS guards. Migrations must be idempotent.
-        - Never DROP TABLE or DROP COLUMN without an explicit comment explaining why
-          and what data loss is accepted.
-        - Never ALTER COLUMN in a way that is not backward-compatible with the running
-          application (e.g., adding NOT NULL without a DEFAULT to a populated table).
-        - New indexes must use CREATE INDEX IF NOT EXISTS.
-        - The betterbase_meta schema prefix must be on every table reference.
-        - pgcrypto extension (CREATE EXTENSION IF NOT EXISTS pgcrypto) must exist before
-          any gen_random_uuid() call.
-
-    # ── Docker / Infrastructure ───────────────────────────────────────────────
-    - path: "docker/**"
-      instructions: |
-        Nginx reverse proxy configuration for self-hosted deployment.
-
-        ROUTING INVARIANTS:
-        - /admin/* and /device/* must proxy to betterbase-server:3001.
-        - /storage/* must proxy to minio:9000 with rewrite (strip /storage prefix).
-        - / (catch-all) proxies to betterbase-dashboard:80 with SPA fallback.
-        - /realtime/* needs WebSocket upgrade headers (Upgrade, Connection).
-        - client_max_body_size must be at least 100m for file uploads.
+        Migration invariants:
+        - Naming: NNN_description.sql (sequential, no gaps)
+        - Idempotent: use IF NOT EXISTS / IF EXISTS guards
+        - No DROP without explicit comment on data loss
+        - No ALTER COLUMN breaking backward compatibility
+        - CREATE INDEX IF NOT EXISTS for indexes
+        - betterbase_meta schema prefix on all tables
+        - pgcrypto extension before gen_random_uuid()
 
     - path: "docker-compose.self-hosted.yml"
       instructions: |
-        Docker Compose for the self-hosted deployment.
+        Docker compose invariants:
+        - BETTERBASE_JWT_SECRET uses :? syntax (fail fast if unset)
+        - Service order: postgres+minio healthy → server → dashboard → nginx
+        - All services on betterbase-internal network
+        - Named volume mounts for postgres/minio
+        - server DATABASE_URL uses internal service name (postgres)
 
-        INVARIANTS:
-        - BETTERBASE_JWT_SECRET uses :? syntax — Compose must fail fast if unset.
-        - Service dependency order: postgres+minio healthy → betterbase-server →
-          betterbase-dashboard → nginx.
-        - minio-init container must use depends_on with condition: service_healthy.
-        - All services on betterbase-internal network. Only nginx exposes a port.
-        - postgres and minio must have named volume mounts (not anonymous).
-        - betterbase-server DATABASE_URL must use the internal service name (postgres),
-          not localhost.
-
-    # ── Spec / Documentation files ────────────────────────────────────────────
-    - path: "**/*.md"
+    - path: "docker/**"
       instructions: |
-        For spec documents (BetterBase_*_Spec.md): these are orchestrator instructions
-        for Kilo Code. Verify internal consistency:
-        - Task dependencies (Depends on: X) must reference tasks that exist earlier in
-          the same document or a prior spec.
-        - File paths referenced must be consistent with the monorepo structure in CODEBASE_MAP.md.
-        - Acceptance criteria must be verifiable (not vague like "works correctly").
+        Nginx config invariants:
+        - /admin/* and /device/* proxy to betterbase-server:3001
+        - /storage/* proxy to minio:9000 with rewrite
+        - / catch-all to betterbase-dashboard:80 with SPA fallback
+        - /realtime/* needs WebSocket upgrade headers
+        - client_max_body_size >= 100m
 
-  # ── Auto-review triggers ──────────────────────────────────────────────────
-  auto_review:
+auto_review:
+  enabled: true
+  drafts: false
+  base_branches: ["main", "develop"]
+
+finishing_touches:
+  docstrings:
+    enabled: false
+
+  generate_agent_prompt:
     enabled: true
-    drafts: false
-    base_branches:
-      - "main"
-      - "develop"
+    prompt: |
+      ## Kilo Code — Full Agent Prompt (All Issues This Review)
 
-  # ── Finishing touches — agent prompts generated after every review ─────────
-  #
-  # HOW THIS WORKS:
-  # CodeRabbit appends these prompts as a final comment block on every PR review.
-  # The "finishing_touches" section controls what gets generated.
-  # Each prompt is scoped to a severity tier. The consolidated prompt always fires.
-  # Per-category prompts fire only when CodeRabbit flagged issues in that tier.
-  #
-  finishing_touches:
-    docstrings:
-      enabled: false  # We don't want auto-docstrings — spec-driven workflow
+      You are Kilo Code on the BetterBase monorepo. Address ALL issues flagged.
 
-    # ── CONSOLIDATED AGENT PROMPT (fires on every review, no exceptions) ──────
-    generate_agent_prompt:
-      enabled: true
-      prompt: |
-        ## 🤖 Kilo Code — Full Agent Prompt (All Issues This Review)
+      ### Context
+      - Runtime: Bun (use process.execPath, never "bun" string)
+      - Framework: Hono (server), React Router v7 (dashboard)
+      - ORM: Drizzle (type-safe, raw SQL in migrations only)
+      - CLI: init in PUBLIC_COMMANDS, API calls via apiRequest()
 
-        You are Kilo Code operating on the BetterBase monorepo. Below is the complete
-        set of issues CodeRabbit flagged in this PR. Address ALL of them in a single
-        orchestrated pass. Do not skip issues marked minor — they accumulate into
-        technical debt on a solo-developer codebase.
+      ### Critical Invariants
+      1. /admin/auth/setup returns 410 if admin exists
+      2. Admin keys SHA-256 hashed before storage
+      3. betterbase_meta.audit_log: no update/delete routes
+      4. Webhook delivery log awaited, request logs fire-and-forget
+      5. Dashboard colors: CSS variables only
+      6. Dashboard API calls via src/lib/api.ts
 
-        ### Monorepo Context
-        - Runtime: Bun (always use process.execPath, never "bun" string in spawn)
-        - Framework: Hono on packages/server, React Router v7 on apps/dashboard
-        - ORM: Drizzle — all DB queries type-safe, raw SQL only in migrations
-        - Auth: BetterAuth (packages/core) + JWT/bcrypt (packages/server/src/lib/auth.ts)
-        - CLI: packages/cli — init MUST be in PUBLIC_COMMANDS, all API calls via apiRequest()
-        - Migrations: packages/server/migrations/ — sequential NNN_*.sql, idempotent, no gaps
+      ### Issues to Fix
+      {{review_issues}}
 
-        ### Critical Invariants (never violate these while fixing)
-        1. /admin/auth/setup returns 410 if any admin exists — do not remove this check
-        2. Admin keys are SHA-256 hashed before storage — plaintext returned once only
-        3. betterbase_meta.audit_log has NO update/delete routes — ever
-        4. Webhook delivery log (logWebhookDelivery) is awaited — not fire-and-forget
-        5. Request logging middleware is fire-and-forget — never awaited
-        6. Dashboard colors use CSS variables only — no hardcoded hex in JSX
-        7. All dashboard server calls go through src/lib/api.ts — never raw fetch()
-        8. Query keys come from QK factory in src/lib/query-keys.ts — no inline arrays
-        9. Destructive UI actions require ConfirmDialog with resource name typed
-        10. Polling (not SSE) for live log streams — Docker self-hosted compatibility
+      ### Instructions
+      1. Read every flagged file before editing
+      2. Fix in dependency order (server → CLI → client)
+      3. Verify migration sequence has no gaps
+      4. Verify requireAdmin present on server /admin routes
+      5. Verify PUBLIC_COMMANDS contains init after CLI edits
+      6. Run typecheck on modified packages
 
-        ### Issues to Fix
-        {{review_issues}}
+  generate_agent_prompt_critical:
+    enabled: true
+    severity_filter: "critical"
+    prompt: |
+      ## CRITICAL Issues — Must Fix Before Merge
 
-        ### Instructions
-        1. Read every flagged file in full before making any edit
-        2. Fix issues in dependency order — server-side before client-side
-        3. After fixing a migration file, verify the NNN_ sequence has no gaps
-        4. After fixing any packages/server route, verify requireAdmin middleware is present
-        5. After fixing packages/cli/src/index.ts, verify PUBLIC_COMMANDS still contains init
-        6. Run `bun typecheck` equivalent on modified packages before marking complete
-        7. Output a fix summary listing: file path → what was wrong → what was changed
+      Critical = security breach, data loss, auth bypass, broken deployments,
+      audit log mutation, hardcoded credentials.
 
-    # ── CRITICAL ISSUES AGENT PROMPT ─────────────────────────────────────────
-    generate_agent_prompt_critical:
-      enabled: true
-      severity_filter: "critical"
-      prompt: |
-        ## 🚨 Kilo Code — CRITICAL Issues Agent Prompt
+      {{critical_issues}}
 
-        CodeRabbit flagged CRITICAL issues in this PR. These must be resolved before
-        merge. Do not proceed with any other work until these are fixed.
+      ### Fix Protocol
+      1. Stop other work
+      2. Fix security first, add regression test
+      3. Never edit applied migrations — create new
+      4. Add missing middleware, trace all routes in file
+      5. Delete audit log mutation routes
+      6. Commit fixes in isolation
 
-        ### What "critical" means in BetterBase
-        Critical issues are ones that would cause any of:
-        - Security breach (unauthenticated admin access, key exposure, SQL injection)
-        - Data loss (migration with DROP without guard, missing IF NOT EXISTS)
-        - Auth bypass (/admin/auth/setup missing 410 check, requireAdmin missing on route)
-        - Broken deployments (BETTERBASE_JWT_SECRET not enforced, minio-init not gated)
-        - Audit log mutation (any UPDATE or DELETE on betterbase_meta.audit_log)
-        - Hardcoded credentials or secrets in source files
+  generate_agent_prompt_major:
+    enabled: true
+    severity_filter: "major"
+    prompt: |
+      ## MAJOR Issues — Must Fix Before Merge
 
-        ### Critical Issues Flagged
-        {{critical_issues}}
+      Major = incorrect behavior, broken self-hosted compatibility,
+      fire-and-forget/await confusion, raw fetch() in dashboard,
+      missing provision_project_schema().
 
-        ### Fix Protocol for Critical Issues
-        1. Stop all other work immediately
-        2. For security issues: fix the vulnerability first, then add a regression test
-           or acceptance criteria comment explaining how to verify the fix
-        3. For migration issues: never edit an applied migration — create a new one
-        4. For auth bypass: add the missing middleware, then trace every other route in
-           that file to ensure none were also missed
-        5. For audit log mutation: delete the route entirely — no workarounds
-        6. Commit critical fixes in isolation (separate commit from other changes)
-        7. Explicitly confirm: "Critical issue [X] resolved — [what was done]"
+      {{major_issues}}
 
-        ### Monorepo Paths Most Likely Involved
-        - packages/server/src/routes/admin/ — route-level auth enforcement
-        - packages/server/src/lib/admin-middleware.ts — requireAdmin implementation
-        - packages/server/src/routes/admin/auth.ts — setup endpoint 410 guard
-        - packages/server/migrations/ — migration sequencing and idempotency
-        - packages/server/src/routes/admin/projects.ts — admin key hashing
+      ### Fix Protocol
+      - Replace fetch() with api.get/post/patch/delete from src/lib/api.ts
+      - Add queryClient.invalidateQueries() in useMutation onSuccess
+      - Use process.execPath in CLI spawn calls
+      - Add requireAdmin middleware to missed routes
 
-    # ── MAJOR ISSUES AGENT PROMPT ─────────────────────────────────────────────
-    generate_agent_prompt_major:
-      enabled: true
-      severity_filter: "major"
-      prompt: |
-        ## ⚠️ Kilo Code — MAJOR Issues Agent Prompt
+  generate_agent_prompt_minor:
+    enabled: true
+    severity_filter: "minor"
+    prompt: |
+      ## MINOR Issues — Fix in This PR
 
-        CodeRabbit flagged MAJOR issues in this PR. These must be fixed before merge.
-        They do not represent immediate security risks but will cause correctness bugs,
-        broken features, or architectural drift if left unfixed.
+      Minor = style drift, missing types, magic numbers, unused imports,
+      CSS variable inconsistency, spec/doc mismatch.
 
-        ### What "major" means in BetterBase
-        Major issues are ones that cause:
-        - Incorrect behavior that users will hit (stale UI after mutation, wrong HTTP status)
-        - Broken self-hosted compatibility (hardcoded localhost URLs, SSE instead of polling)
-        - Missing fire-and-forget vs await distinction (wrong category causes either
-          delayed responses or lost logs)
-        - Direct fetch() calls in dashboard bypassing api.ts (breaks 401 redirect, VITE_API_URL)
-        - Inline query key arrays bypassing QK factory (breaks cache invalidation)
-        - Missing EmptyState on list views (blank page UX bug)
-        - useState for filterable/paginated data that should be in URL params
-        - spawn("bun") instead of spawn(process.execPath) in CLI
-        - Missing provision_project_schema() call on project creation
-        - Missing Zod validation on request body in Hono handler
+      {{minor_issues}}
 
-        ### Major Issues Flagged
-        {{major_issues}}
-
-        ### Fix Protocol for Major Issues
-        1. For dashboard API calls: replace fetch() with the appropriate api.get/post/patch/delete
-           method from src/lib/api.ts. Check that the endpoint path matches the backend route.
-        2. For stale UI: add queryClient.invalidateQueries(QK.relevantKey()) in the
-           useMutation onSuccess callback.
-        3. For filter state: migrate from useState to useSearchParams. Ensure the URL
-           param is read on mount and written on change.
-        4. For fire-and-forget/await confusion: check the table in this config's server
-           path_instructions — request logs and audit writes are fire-and-forget,
-           delivery/invocation logs are awaited.
-        5. For missing provision_project_schema(): add the pool.query call immediately
-           after the project INSERT in the POST /admin/projects handler.
-        6. For Hono validation: wrap the handler with zValidator("json", YourSchema)
-           and replace c.req.json() with c.req.valid("json").
-        7. Confirm each fix with: "Major issue [X] fixed — [file:line] — [what changed]"
-
-        ### Key Files for Major Fixes
-        - apps/dashboard/src/lib/api.ts — all dashboard API calls go here
-        - apps/dashboard/src/lib/query-keys.ts — QK factory, all cache keys
-        - packages/server/src/routes/admin/projects.ts — provision_project_schema call
-        - packages/cli/src/utils/api-client.ts — apiRequest() implementation
-        - packages/cli/src/index.ts — PUBLIC_COMMANDS array
-
-    # ── MINOR ISSUES AGENT PROMPT ─────────────────────────────────────────────
-    generate_agent_prompt_minor:
-      enabled: true
-      severity_filter: "minor"
-      prompt: |
-        ## 🔧 Kilo Code — MINOR Issues Agent Prompt
-
-        CodeRabbit flagged MINOR issues in this PR. These should be fixed in this PR
-        rather than deferred. On a solo-developer codebase, minor issues compound fast.
-
-        ### What "minor" means in BetterBase
-        Minor issues are ones that cause:
-        - Style or consistency drift from the established patterns (but not bugs yet)
-        - Missing TypeScript types replaced with `any` without comment
-        - Hardcoded magic numbers that should be named constants (poll intervals, timeouts,
-          bcrypt rounds, etc.)
-        - Missing error handling on a code path that is unlikely but possible
-        - Comments or documentation that contradict the actual implementation
-        - Unused imports or variables left in (Bun/TypeScript will catch these but
-          they add noise to future reviews)
-        - CSS variable inconsistency in dashboard (e.g. color-text-primary vs hardcoded gray)
-        - Missing `// Fire-and-forget` comment on intentionally unawaited promises
-          (without the comment, future reviewers will flag them as bugs)
-        - Spec document inconsistency (file path in spec doesn't match CODEBASE_MAP.md)
-        - Migration file with no IF NOT EXISTS guard that should have one
-
-        ### Minor Issues Flagged
-        {{minor_issues}}
-
-        ### Fix Protocol for Minor Issues
-        1. Fix all minor issues in a single commit, separate from critical/major fixes
-        2. For `any` types: add the correct type or, if genuinely unknown, add a comment
-           explaining why: `// eslint-disable-next-line @typescript-eslint/no-explicit-any — reason`
-        3. For magic numbers: extract to a named constant at the top of the file.
-           Example: `const POLL_INTERVAL_MS = 5000` not `setTimeout(..., 5000)`
-        4. For unawaited promises that are intentionally fire-and-forget: add comment
-           `// Fire-and-forget — intentional, never delay response for this` above the call
-        5. For unused imports: remove them
-        6. For spec/doc inconsistencies: update the spec to match implementation,
-           or update implementation to match spec — whichever is more correct
-        7. Confirm batch: "All minor issues resolved — [count] fixes in [commit sha]"
-
-        ### Style Reference
-        The authoritative style for BetterBase is:
-        - TypeScript strict mode, no implicit any
-        - Named constants for all timing values, limits, and magic numbers
-        - Explicit return types on all exported functions
-        - JSDoc only on exported public API functions in packages/client and packages/core
-        - No JSDoc in internal server/CLI code — code should be self-documenting
+      ### Fix Protocol
+      1. Fix all in single commit
+      2. Extract magic numbers to named constants
+      3. Add `// Fire-and-forget — intentional` comments
+      4. Remove unused imports
+      5. Align specs with implementation
 
 chat:
   auto_reply: true
 
-# ── Knowledge base ────────────────────────────────────────────────────────────
 knowledge_base:
-  learnings:
-    scope: auto
-  issues:
-    scope: auto
+  learnings: { scope: auto }
+  issues: { scope: auto }
   opt_out: false

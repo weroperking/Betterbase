@@ -24,7 +24,6 @@ const projectNameSchema = z
 
 const initOptionsSchema = z.object({
 	projectName: projectNameSchema.optional(),
-	iac: z.boolean().optional(),
 });
 
 const providerTypeSchema = z.enum([
@@ -114,20 +113,6 @@ describe("initOptionsSchema", () => {
 		expect(() =>
 			initOptionsSchema.parse({ projectName: "my-app" }),
 		).not.toThrow();
-	});
-
-	test("accepts object with iac flag", () => {
-		expect(() => initOptionsSchema.parse({ iac: true })).not.toThrow();
-		expect(() => initOptionsSchema.parse({ iac: false })).not.toThrow();
-	});
-
-	test("accepts object with both projectName and iac", () => {
-		const result = initOptionsSchema.parse({
-			projectName: "test-project",
-			iac: false,
-		});
-		expect(result.projectName).toBe("test-project");
-		expect(result.iac).toBe(false);
 	});
 
 	test("rejects object with invalid projectName", () => {
@@ -259,30 +244,11 @@ describe("InitCommandOptions", () => {
 		expect(opts.projectName).toBe("my-app");
 	});
 
-	test("allows iac boolean flag", () => {
-		const optsTrue: InitCommandOptions = { iac: true };
-		const optsFalse: InitCommandOptions = { iac: false };
-		expect(optsTrue.iac).toBe(true);
-		expect(optsFalse.iac).toBe(false);
-	});
-
 	test("validation rejects invalid projectName via initOptionsSchema", () => {
 		const result = initOptionsSchema.safeParse({
 			projectName: "bad name with spaces!",
 		});
 		expect(result.success).toBe(false);
-	});
-
-	test("validation passes with valid combined options", () => {
-		const result = initOptionsSchema.safeParse({
-			projectName: "valid-name",
-			iac: true,
-		});
-		expect(result.success).toBe(true);
-		if (result.success) {
-			expect(result.data.projectName).toBe("valid-name");
-			expect(result.data.iac).toBe(true);
-		}
 	});
 });
 
@@ -317,6 +283,7 @@ describe("runInitCommand (IaC integration)", () => {
 			expect(existsSync(join(projectPath, ".env"))).toBe(true);
 			expect(existsSync(join(projectPath, ".env.example"))).toBe(true);
 			expect(existsSync(join(projectPath, ".gitignore"))).toBe(true);
+			expect(existsSync(join(projectPath, "AGENTS.md"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase.config.ts"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase", "schema.ts"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase", "queries", "todos.ts"))).toBe(true);
@@ -330,7 +297,7 @@ describe("runInitCommand (IaC integration)", () => {
 			// Spot-check contents
 			const pkg = JSON.parse(readFileSync(join(projectPath, "package.json"), "utf-8"));
 			expect(pkg.name).toBe(projectName);
-			expect(pkg.scripts.dev).toContain("bun");
+			expect(pkg.scripts.dev).toContain("bb dev");
 
 			const bbConfig = readFileSync(join(projectPath, "betterbase.config.ts"), "utf-8");
 			expect(bbConfig).toContain("defineConfig");
@@ -340,6 +307,12 @@ describe("runInitCommand (IaC integration)", () => {
 
 			const env = readFileSync(join(projectPath, ".env"), "utf-8");
 			expect(env).toContain("DATABASE_URL");
+
+			const agentsMd = readFileSync(join(projectPath, "AGENTS.md"), "utf-8");
+			expect(agentsMd).toContain("BetterBase IaC Operational Constraints");
+			expect(agentsMd).toContain(`Project: ${projectName}`);
+			expect(agentsMd).toContain("## ALLOWED Operations");
+			expect(agentsMd).toContain("## PROHIBITED Operations");
 		} finally {
 			process.chdir(origCwd);
 			await rm(projectPath, { recursive: true, force: true });

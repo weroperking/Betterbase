@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { clearCredentials, loadCredentials, saveCredentials } from "../utils/credentials";
 import { blank, box, error, keyValue, section, success, sym } from "../utils/logger";
 import { createSpinner } from "../utils/spinner";
+import { createApiClient } from "../utils/api-client";
 
 const DEFAULT_SERVER_URL = "https://api.betterbase.io";
 const POLL_INTERVAL_MS = 5000;
@@ -174,6 +175,28 @@ export async function runApiKeyLogin(opts: {
 export async function runLogoutCommand(): Promise<void> {
 	clearCredentials();
 	success("Logged out.");
+}
+
+export async function runHeadlessLogin(opts: {
+	apiKey: string;
+	serverUrl?: string;
+}) {
+	const apiClient = createApiClient({ baseUrl: opts.serverUrl });
+
+	// Validate API key with server
+	const valid = await apiClient.validateApiKey(opts.apiKey);
+	if (!valid) {
+		throw new Error('Invalid API key');
+	}
+
+	// Store credentials securely
+	saveCredentials({
+		token: opts.apiKey,
+		server_url: opts.serverUrl ?? "https://api.betterbase.io",
+		created_at: new Date().toISOString(),
+	});
+
+	return { success: true };
 }
 
 export async function getCredentials() {

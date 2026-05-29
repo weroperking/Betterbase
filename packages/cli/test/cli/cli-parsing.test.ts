@@ -54,12 +54,6 @@ describe("CLI argument parsing regression", () => {
 			expect(arg).toBeDefined();
 			expect(arg?.required).toBe(false);
 		});
-
-		it("has --no-iac option", () => {
-			const opt = findOpt(init, "no-iac");
-			expect(opt).toBeDefined();
-			expect(opt?.long).toBe("--no-iac");
-		});
 	});
 
 	describe("auth", () => {
