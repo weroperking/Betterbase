@@ -21,6 +21,22 @@ reviews:
     - "!**/.betterbase-context.json"
 
   path_instructions:
+    - path: "**/BetterBase_*_Spec.md"
+      instructions: |
+        Spec/charter documents. Verify:
+        - Task dependencies are clearly stated
+        - Monorepo file paths are correct and use proper package names
+        - Acceptance criteria is verifiable with exact commands/checks
+        - No ambiguous language - use concrete, testable requirements
+
+    - path: "**/*_charter.md"
+      instructions: |
+        Charter documents. Verify:
+        - Task dependencies are clearly stated
+        - Monorepo file paths are correct and use proper package names
+        - Acceptance criteria is verifiable with exact commands/checks
+        - No ambiguous language - use concrete, testable requirements
+
     - path: "packages/server/**"
       instructions: |
         Self-hosted BetterBase server. Security invariants:

@@ -47,7 +47,7 @@ export async function runIacSync(
 
 	const diff = diffSchemas(previous, current);
 
-	if (diff.isEmpty) {
+	if (diff.isEmpty && !opts.headless && !opts.autoRegister) {
 		if (!opts.silent) success("Schema is up to date. No changes detected.");
 		return;
 	}
@@ -104,21 +104,18 @@ export async function runIacSync(
 			section("Headless Sync");
 			info("Synchronizing with @betterbase/server...");
 		}
-		
-		// Load and validate schema
-		const schema = await loadSerializedSchema(prevFile);
-		
+
 		// Detect environment configuration
 		const envConfig = await detectEnvironmentConfig(projectRoot);
-		
-		// Sync with server
+
+		// Sync with server (use current serialized schema)
 		await syncWithServer(projectRoot, {
-			schema,
+			schema: current,
 			envConfig,
 			environment: opts.environment ?? 'local',
 			force: opts.force,
 		});
-		
+
 		if (!opts.silent) success("Headless sync complete.");
 	}
 

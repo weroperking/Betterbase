@@ -314,20 +314,6 @@ iac
 		});
 
 	iac
-		.command("import")
-		.description("Import data into the project database")
-		.argument("<input>", "Input file path to import")
-		.option("-t, --table <name>", "Table name to import into")
-		.option("-d, --dry-run", "Preview changes without applying them")
-		.action(async (input: string, options: { table?: string; dryRun?: boolean }) => {
-			await runIacImport(process.cwd(), {
-				input,
-				table: options.table,
-				dryRun: options.dryRun,
-			});
-		});
-
-	iac
 		.command("migrate-legacy")
 		.description("Migrate a legacy BetterBase project to IaC mode")
 		.argument("[project-root]", "project root directory", process.cwd())
@@ -633,6 +619,10 @@ program
 	.option("--api-key <key>", "API key for headless authentication")
 	.action(async (opts) => {
 		if (opts.headless) {
+			if (!opts.apiKey) {
+				logger.error("Missing --api-key: --api-key is required when using --headless");
+				process.exit(1);
+			}
 			const { runHeadlessLogin } = await import("./commands/login");
 			await runHeadlessLogin({ 
 				apiKey: opts.apiKey, 

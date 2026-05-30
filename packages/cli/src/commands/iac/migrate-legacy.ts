@@ -88,7 +88,7 @@ async function scanLegacyRoutes(projectRoot: string): Promise<LegacyRoute[]> {
 		const content = await readFile(fullPath, "utf-8");
 		
 		// Check if this is a Hono route file
-		if (content.includes("Hono") && (content.includes(".get(") || content.includes(".post("))) {
+		if (content.includes("Hono") && (content.includes(".get(") || content.includes(".post(") || content.includes(".put(") || content.includes(".delete("))) {
 			// Extract HTTP methods
 			const methods = [];
 			if (content.includes(".get(")) methods.push("GET");
@@ -158,46 +158,13 @@ export default async function(input: any) {
 }
 
 async function generateAgentsConstraintFile(projectRoot: string): Promise<void> {
-	const agentsContent = `# BetterBase IaC Operational Constraints
-
-## ⚠️ CRITICAL: READ BEFORE ANY CODE CHANGES
-
-This project operates under **strict Infrastructure-as-Code (IaC) enforcement**.
-Violations will result in build/deployment failures.
-
-## ALLOWED Operations
-
-### 1. Schema Definition ONLY
-- ✅ Edit \`betterbase/schema.ts\` to declare tables
-- ✅ Use \`v.string()\`, \`v.number()\`, \`v.id("table")\`, etc.
-- ✅ Add \`.index()\`, \`.uniqueIndex()\` declarations
-- ✌️ Run \`bb iac sync\` to apply schema changes
-
-### 2. Pure Functions ONLY
-- ✅ Create files in \`betterbase/queries/\` (read-only operations)
-- ✅ Create files in \`betterbase/mutations/\` (write operations)
-- ✅ Create files in \`betterbase/actions/\` (side effects)
-- ✅ Use \`ctx.db.query()\`, \`ctx.db.get()\`, \`ctx.db.insert()\`, etc.
-
-## PROHIBITED Operations
-
-### ❌ Custom Hono Routes
-All API endpoints must be defined as IaC functions that automatically expose
-HTTP endpoints at \`\`/betterbase/:kind/:path/:name\`\`.
-
-### ❌ Direct Database Access
-Direct SQL queries outside \`ctx.db\` are not allowed.
-
-### ❌ Package.json Modifications
-Dependencies are managed automatically by:
-- \`bb deps install\` — Installs required dependencies
-- \`bb deps update\` — Updates to latest compatible versions
-
-## Notes
-
-This project was migrated from legacy BetterBase format.
-Refer to the MIGRATION_GUIDE.md for more information.
-`;
+	const templatePath = path.join(import.meta.dirname, "..", "..", "..", "..", "..", "templates", "iac", "AGENTS.md");
+	let agentsContent: string;
+	try {
+		agentsContent = await readFile(templatePath, "utf-8");
+	} catch {
+		throw new Error(`Failed to read AGENTS.md template from ${templatePath}. Ensure templates/iac/AGENTS.md exists.`);
+	}
 	
 	await writeFile(path.join(projectRoot, "AGENTS.md"), agentsContent);
 }

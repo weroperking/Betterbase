@@ -181,7 +181,7 @@ export async function runHeadlessLogin(opts: {
 	apiKey: string;
 	serverUrl?: string;
 }) {
-	const apiClient = createApiClient({ baseUrl: opts.serverUrl });
+	const apiClient = createApiClient(opts.serverUrl);
 
 	// Validate API key with server
 	const valid = await apiClient.validateApiKey(opts.apiKey);
@@ -189,12 +189,16 @@ export async function runHeadlessLogin(opts: {
 		throw new Error('Invalid API key');
 	}
 
-	// Store credentials securely
-	saveCredentials({
-		token: opts.apiKey,
-		server_url: opts.serverUrl ?? "https://api.betterbase.io",
-		created_at: new Date().toISOString(),
-	});
+// Store credentials securely
+  if (!opts.apiKey) {
+    throw new Error('API key is required for headless login');
+  }
+  saveCredentials({
+    token: opts.apiKey,
+    admin_email: 'headless@betterbase.io',
+    server_url: opts.serverUrl ?? "https://api.betterbase.io",
+    created_at: new Date().toISOString(),
+  });
 
 	return { success: true };
 }

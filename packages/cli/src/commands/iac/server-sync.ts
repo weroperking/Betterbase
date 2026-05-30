@@ -1,5 +1,4 @@
 import { ProjectEnvironment } from "./env-detector";
-import { loadSerializedSchema, serializeSchema } from "@betterbase/core/iac";
 import { createApiClient } from "../utils/api-client";
 import { isAuthenticated } from "../utils/credentials";
 import { SerializedSchema } from "@betterbase/core/iac";
@@ -12,9 +11,9 @@ export interface SyncWithServerOptions {
 }
 
 export async function syncWithServer(
-  projectRoot: string,
-  config: SyncWithServerOptions
-): Promise<void> {
+   projectRoot: string,
+   config: SyncWithServerOptions
+): Promise<{ success: boolean }> {
   // Check authentication
   if (!await isAuthenticated()) {
     throw new Error(

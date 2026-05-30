@@ -66,26 +66,10 @@ export class ApiClient {
 
 	// NEW: Get project by slug/name
 	async getProject(slug: string): Promise<{ id: string; slug: string } | null> {
-		return this.get(`/api/projects/${slug}`).catch(() => null);
+		return (await this.get<{id:string;slug:string}>(`/api/projects/${slug}`)) as {id:string;slug:string}|null;
 	}
 
-	// NEW: Validate API key
-	async validateApiKey(apiKey: string): Promise<boolean> {
-		try {
-			const res = await fetch(`${this.baseUrl}/api/auth/validate`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${apiKey}`,
-				},
-			});
-			return res.ok;
-		} catch {
-			return false;
-		}
-	}
-
-  // NEW: Validate API key (doesn't require existing credentials)
+// NEW: Validate API key (doesn't require existing credentials)
 	async validateApiKey(apiKey: string): Promise<boolean> {
 		try {
 			const res = await fetch(`${this.baseUrl}/api/auth/validate`, {

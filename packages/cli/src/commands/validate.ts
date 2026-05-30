@@ -17,7 +17,7 @@ const forbiddenPatterns = [
 
 export async function runValidateProject(projectRoot: string): Promise<ValidationResult> {
   const result: ValidationResult = { valid: true, violations: [] };
-  
+
   // Check for src/routes directory
   const routesDir = path.join(projectRoot, "src/routes");
   if (existsSync(routesDir)) {
@@ -27,7 +27,10 @@ export async function runValidateProject(projectRoot: string): Promise<Validatio
         result.violations.push("Custom Hono routes detected in src/routes/ - use betterbase/mutations or betterbase/queries");
         result.valid = false;
       }
-    } catch {}
+    } catch (err) {
+      logger.error(`Failed to read routes directory: ${err}`);
+      throw err;
+    }
   }
   
   // Check for AGENTS.md

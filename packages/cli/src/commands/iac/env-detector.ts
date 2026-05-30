@@ -95,10 +95,14 @@ export async function detectEnvironmentConfig(projectRoot: string): Promise<Proj
     // Parse provider type from config
     const providerMatch = configContent.match(/type:\s*["']([^"']+)["']/);
     if (providerMatch) {
-      const provider = providerMatch[1] as 'postgresql' | 'turso' | 'planetscale' | 'supabase' | 'neon';
-      if (provider) envConfig.database.provider = provider;
+      const captured = providerMatch[1].trim().toLowerCase();
+      const allowedProviders = ['postgresql', 'turso', 'planetscale', 'supabase', 'neon'] as const;
+      type AllowedProvider = typeof allowedProviders[number];
+      if (allowedProviders.includes(captured as AllowedProvider)) {
+        envConfig.database.provider = captured as AllowedProvider;
+      }
     }
   }
-  
+
   return envConfig;
 }

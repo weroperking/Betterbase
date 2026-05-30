@@ -82,12 +82,13 @@ bb iac sync
 - Pure TypeScript business logic only
 - Reused by IaC functions via relative imports
 
-### Generated Files (_generated/)
-- `betterbase/_generated/api.d.ts` — Type-safe function API
-- `betterbase/_generated/schema.json` — Serialized schema
-- `src/db/schema.generated.ts` — Drizzle schema (auto-generated)
+### Generated Files
 
-**NEVER EDIT FILES IN `_generated/`** — They are overwritten on every `bb iac sync`.
+**`betterbase/_generated/*`** (auto-generated - never edit)
+- `betterbase/_generated/api.d.ts` — Type-safe function API (regenerated on every sync)
+- `betterbase/_generated/schema.json` — Serialized schema (regenerated on every sync)
+
+**`src/db/schema.generated.ts`** (auto-generated — do not manually edit; changes should come from the generator)
 
 ## Violation Detection
 

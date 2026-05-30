@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it, test } from "bun:test";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,47 +25,6 @@ const projectNameSchema = z
 const initOptionsSchema = z.object({
 	projectName: projectNameSchema.optional(),
 });
-
-const providerTypeSchema = z.enum([
-	"neon",
-	"turso",
-	"planetscale",
-	"supabase",
-	"postgres",
-	"managed",
-]);
-
-function getDatabaseLabel(provider: string): string {
-	const labels: Record<string, string> = {
-		neon: "Neon (serverless Postgres)",
-		turso: "Turso (edge SQLite)",
-		planetscale: "PlanetScale (MySQL-compatible)",
-		supabase: "Supabase (Postgres)",
-		postgres: "Raw Postgres",
-		managed: "Managed by BetterBase (coming soon)",
-	};
-	return labels[provider] ?? "Unknown";
-}
-
-function getAuthDialect(provider: string): "sqlite" | "pg" | "mysql" {
-	if (provider === "turso") return "sqlite";
-	if (provider === "planetscale") return "mysql";
-	return "pg";
-}
-
-function containsTableDefinition(
-	content: string,
-	tableName: string,
-	importModule: string,
-	tableFn: string,
-): boolean {
-	return (
-		content.includes(importModule) &&
-		content.includes(`export const ${tableName}`) &&
-		content.includes(`${tableFn}(`) &&
-		content.includes(".primaryKey()")
-	);
-}
 
 // ---------------------------------------------------------------------------
 // projectNameSchema
@@ -122,115 +81,8 @@ describe("initOptionsSchema", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// providerTypeSchema
-// ---------------------------------------------------------------------------
-
-describe("providerTypeSchema", () => {
-	test("accepts all valid provider types", () => {
-		const validProviders = [
-			"neon",
-			"turso",
-			"planetscale",
-			"supabase",
-			"postgres",
-			"managed",
-		] as const;
-
-		for (const provider of validProviders) {
-			expect(() => providerTypeSchema.parse(provider)).not.toThrow();
-			expect(providerTypeSchema.parse(provider)).toBe(provider);
-		}
-	});
-
-	test("rejects invalid provider types", () => {
-		expect(() => providerTypeSchema.parse("sqlite")).toThrow();
-		expect(() => providerTypeSchema.parse("mysql")).toThrow();
-		expect(() => providerTypeSchema.parse("mongodb")).toThrow();
-		expect(() => providerTypeSchema.parse("")).toThrow();
-		expect(() => providerTypeSchema.parse("NEON")).toThrow();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// getDatabaseLabel
-// ---------------------------------------------------------------------------
-
-describe("getDatabaseLabel", () => {
-	test("returns correct label for neon", () => {
-		expect(getDatabaseLabel("neon")).toBe("Neon (serverless Postgres)");
-	});
-
-	test("returns correct label for turso", () => {
-		expect(getDatabaseLabel("turso")).toBe("Turso (edge SQLite)");
-	});
-
-	test("returns correct label for planetscale", () => {
-		expect(getDatabaseLabel("planetscale")).toBe(
-			"PlanetScale (MySQL-compatible)",
-		);
-	});
-
-	test("returns correct label for supabase", () => {
-		expect(getDatabaseLabel("supabase")).toBe("Supabase (Postgres)");
-	});
-
-	test("returns correct label for postgres", () => {
-		expect(getDatabaseLabel("postgres")).toBe("Raw Postgres");
-	});
-
-	test("returns correct label for managed", () => {
-		expect(getDatabaseLabel("managed")).toBe(
-			"Managed by BetterBase (coming soon)",
-		);
-	});
-
-	test("every known provider has a distinct label", () => {
-		const providers = [
-			"neon",
-			"turso",
-			"planetscale",
-			"supabase",
-			"postgres",
-			"managed",
-		] as const;
-		const labels = providers.map((p) => getDatabaseLabel(p));
-		expect(new Set(labels).size).toBe(providers.length);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// getAuthDialect
-// ---------------------------------------------------------------------------
-
-describe("getAuthDialect", () => {
-	test("returns sqlite for turso", () => {
-		expect(getAuthDialect("turso")).toBe("sqlite");
-	});
-
-	test("returns mysql for planetscale", () => {
-		expect(getAuthDialect("planetscale")).toBe("mysql");
-	});
-
-	test("returns pg for neon", () => {
-		expect(getAuthDialect("neon")).toBe("pg");
-	});
-
-	test("returns pg for postgres", () => {
-		expect(getAuthDialect("postgres")).toBe("pg");
-	});
-
-	test("returns pg for supabase", () => {
-		expect(getAuthDialect("supabase")).toBe("pg");
-	});
-
-	test("returns pg for managed", () => {
-		expect(getAuthDialect("managed")).toBe("pg");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// InitCommandOptions type
+ // ---------------------------------------------------------------------------
+ // InitCommandOptions type
 // ---------------------------------------------------------------------------
 
 describe("InitCommandOptions", () => {

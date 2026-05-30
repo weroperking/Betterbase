@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { z } from "zod";
@@ -56,21 +56,6 @@ async function copyIaCTemplate(targetDir: string, projectName: string): Promise<
 		throw error;
 	}
 
-	const copyDir = async (src: string, dest: string) => {
-		await mkdir(dest, { recursive: true });
-		const entries = await readdir(src, { withFileTypes: true });
-		for (const entry of entries) {
-			const srcPath = path.join(src, entry.name);
-			const destPath = path.join(dest, entry.name);
-			if (entry.isFile()) {
-				const content = await readFile(srcPath);
-				await writeFile(destPath, content);
-			} else if (entry.isDirectory()) {
-				await copyDir(srcPath, destPath);
-			}
-		}
-	};
-
 	const templateFiles = [
 		"package.json",
 		"tsconfig.json",
@@ -113,7 +98,11 @@ async function copyIaCTemplate(targetDir: string, projectName: string): Promise<
 		const pkgJson = JSON.parse(await readFile(pkgPath, "utf-8"));
 		pkgJson.name = projectName;
 		await writeFile(pkgPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
-	} catch {
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException | undefined)?.code;
+		if (code !== "ENOENT") {
+			throw err;
+		}
 	}
 
 	await writeFile(
@@ -186,7 +175,7 @@ export async function runInitCommand(rawOptions: InitCommandOptions): Promise<vo
 	logger.info(`Creating BetterBase IaC project: ${projectName}`);
 
 	try {
-		const existingDir = await Bun.file(projectPath).exists();
+		const existingDir = existsSync(projectPath);
 		if (existingDir) {
 			const overwrite = await prompts.confirm({
 				message: `Directory "${projectName}" already exists. Overwrite?`,
