@@ -45,3 +45,13 @@ export function getServerUrl(): string {
 	let url = creds?.server_url ?? "https://api.betterbase.io";
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
 }
+
+// Check if user is authenticated (has valid credentials)
+export async function isAuthenticated(): Promise<boolean> {
+	try {
+		const creds = loadCredentials();
+		return !!creds?.token;
+	} catch {
+		return false;
+	}
+}

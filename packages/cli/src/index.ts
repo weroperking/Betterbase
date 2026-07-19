@@ -9,11 +9,13 @@ import { runGenerateCrudCommand } from "./commands/generate";
 import { runGenerateGraphqlCommand, runGraphqlPlaygroundCommand } from "./commands/graphql";
 import { runIacAnalyze } from "./commands/iac/analyze";
 import { runIacExport } from "./commands/iac/export";
+import { runMigrateLegacyToIaC } from "./commands/iac/migrate-legacy";
 import { runIacGenerate } from "./commands/iac/generate";
 import { runIacImport } from "./commands/iac/import";
 import { runIacSync } from "./commands/iac/sync";
 import { runInitCommand } from "./commands/init";
 import { isAuthenticated, runLoginCommand, runLogoutCommand } from "./commands/login";
+import { runValidateProject } from "./commands/validate";
 import {
 	runMigrateCommand,
 	runMigrateHistoryCommand,
@@ -135,14 +137,21 @@ export function createProgram(): Command {
 		process.exit(1);
 	});
 
+program
+	.command("init")
+	.description("Initialize a BetterBase project with BetterBase IaC template")
+	.argument("[project-name]", "project name")
+	.action(async (projectName: string | undefined) => {
+		await runInitCommand({ projectName });
+	});
+
 	program
-		.command("init")
-		.description("Initialize a BetterBase project with BetterBase template (betterbase/ functions)")
-		.option("--no-iac", "Use interactive mode instead of BetterBase template (for legacy projects)")
-		.argument("[project-name]", "project name")
-		.action(async (projectName: string | undefined, options: { iac?: boolean }) => {
-			await runInitCommand({ projectName, ...options });
-		});
+	.command("validate-project")
+	.description("Validate project for IaC compliance")
+	.argument("[project-root]", "project root directory", process.cwd())
+	.action(async (projectRoot: string) => {
+		await runValidateProject(projectRoot);
+	});
 
 	program
 		.command("dev")
@@ -235,14 +244,22 @@ export function createProgram(): Command {
 
 	const iac = program.command("iac").description("IaC (Infrastructure as Code) management");
 
-	iac
-		.command("sync")
-		.description("Sync IaC schema changes and generate Drizzle migration")
-		.argument("[project-root]", "project root directory", process.cwd())
-		.option("--force", "Apply destructive changes without confirmation")
-		.action(async (projectRoot: string, options: { force?: boolean }) => {
-			await runIacSync(projectRoot, { force: options.force });
+iac
+	.command("sync")
+	.description("Sync IaC schema changes and generate Drizzle migration")
+	.argument("[project-root]", "project root directory", process.cwd())
+	.option("--force", "Apply destructive changes without confirmation")
+	.option("--headless", "Non-interactive mode for AI agents")
+	.option("--autoRegister", "Automatically register project with server")
+	.option("--environment <env>", "Target environment (local, staging, production)")
+	.action(async (projectRoot: string, options: { force?: boolean; headless?: boolean; autoRegister?: boolean; environment?: string }) => {
+		await runIacSync(projectRoot, { 
+			force: options.force, 
+			headless: options.headless,
+			autoRegister: options.autoRegister,
+			environment: options.environment
 		});
+	});
 
 	iac
 		.command("generate")
@@ -294,6 +311,14 @@ export function createProgram(): Command {
 				table: options.table,
 				dryRun: options.dryRun,
 			});
+		});
+
+	iac
+		.command("migrate-legacy")
+		.description("Migrate a legacy BetterBase project to IaC mode")
+		.argument("[project-root]", "project root directory", process.cwd())
+		.action(async (projectRoot: string) => {
+			await runMigrateLegacyToIaC(projectRoot);
 		});
 
 	const migrate = program
@@ -585,33 +610,45 @@ export function createProgram(): Command {
 			await runBranchCommand([], projectRoot);
 		});
 
-	program
-		.command("login")
-		.description("Authenticate with a Betterbase instance")
-		.option("--url <url>", "Self-hosted Betterbase server URL", "https://api.betterbase.io")
-		.option("--email <email>", "Admin email (for headless/server login)")
-		.action(async (opts) => {
-			if (opts.email) {
-				const { runApiKeyLogin } = await import("./commands/login");
-				let password = process.env.ADMIN_PASSWORD;
-				if (!password) {
-					const { default: inquirer } = await import("inquirer");
-					const result = await inquirer.prompt<{ password: string }>([
-						{
-							type: "password",
-							name: "password",
-							message: "Admin password:",
-							mask: "*",
-							validate: (value: string) => value.length >= 1 || "Password is required",
-						},
-					]);
-					password = result.password;
-				}
-				await runApiKeyLogin({ serverUrl: opts.url, email: opts.email, password: password ?? "" });
-			} else {
-				await runLoginCommand({ serverUrl: opts.url });
+program
+	.command("login")
+	.description("Authenticate with a Betterbase instance")
+	.option("--url <url>", "Self-hosted Betterbase server URL", "https://api.betterbase.io")
+	.option("--email <email>", "Admin email (for headless/server login)")
+	.option("--headless", "Non-interactive mode for AI agents")
+	.option("--api-key <key>", "API key for headless authentication")
+	.action(async (opts) => {
+		if (opts.headless) {
+			if (!opts.apiKey) {
+				logger.error("Missing --api-key: --api-key is required when using --headless");
+				process.exit(1);
 			}
-		});
+			const { runHeadlessLogin } = await import("./commands/login");
+			await runHeadlessLogin({ 
+				apiKey: opts.apiKey, 
+				serverUrl: opts.url 
+			});
+		} else if (opts.email) {
+			const { runApiKeyLogin } = await import("./commands/login");
+			let password = process.env.ADMIN_PASSWORD;
+			if (!password) {
+				const { default: inquirer } = await import("inquirer");
+				const result = await inquirer.prompt<{ password: string }>([
+					{
+						type: "password",
+						name: "password",
+						message: "Admin password:",
+						mask: "*",
+						validate: (value: string) => value.length >= 1 || "Password is required",
+					},
+				]);
+				password = result.password;
+			}
+			await runApiKeyLogin({ serverUrl: opts.url, email: opts.email, password: password ?? "" });
+		} else {
+			await runLoginCommand({ serverUrl: opts.url });
+		}
+	});
 
 	program.command("logout").description("Sign out of Betterbase").action(runLogoutCommand);
 

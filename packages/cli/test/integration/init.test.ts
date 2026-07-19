@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it, test } from "bun:test";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,49 +24,7 @@ const projectNameSchema = z
 
 const initOptionsSchema = z.object({
 	projectName: projectNameSchema.optional(),
-	iac: z.boolean().optional(),
 });
-
-const providerTypeSchema = z.enum([
-	"neon",
-	"turso",
-	"planetscale",
-	"supabase",
-	"postgres",
-	"managed",
-]);
-
-function getDatabaseLabel(provider: string): string {
-	const labels: Record<string, string> = {
-		neon: "Neon (serverless Postgres)",
-		turso: "Turso (edge SQLite)",
-		planetscale: "PlanetScale (MySQL-compatible)",
-		supabase: "Supabase (Postgres)",
-		postgres: "Raw Postgres",
-		managed: "Managed by BetterBase (coming soon)",
-	};
-	return labels[provider] ?? "Unknown";
-}
-
-function getAuthDialect(provider: string): "sqlite" | "pg" | "mysql" {
-	if (provider === "turso") return "sqlite";
-	if (provider === "planetscale") return "mysql";
-	return "pg";
-}
-
-function containsTableDefinition(
-	content: string,
-	tableName: string,
-	importModule: string,
-	tableFn: string,
-): boolean {
-	return (
-		content.includes(importModule) &&
-		content.includes(`export const ${tableName}`) &&
-		content.includes(`${tableFn}(`) &&
-		content.includes(".primaryKey()")
-	);
-}
 
 // ---------------------------------------------------------------------------
 // projectNameSchema
@@ -116,20 +74,6 @@ describe("initOptionsSchema", () => {
 		).not.toThrow();
 	});
 
-	test("accepts object with iac flag", () => {
-		expect(() => initOptionsSchema.parse({ iac: true })).not.toThrow();
-		expect(() => initOptionsSchema.parse({ iac: false })).not.toThrow();
-	});
-
-	test("accepts object with both projectName and iac", () => {
-		const result = initOptionsSchema.parse({
-			projectName: "test-project",
-			iac: false,
-		});
-		expect(result.projectName).toBe("test-project");
-		expect(result.iac).toBe(false);
-	});
-
 	test("rejects object with invalid projectName", () => {
 		expect(() =>
 			initOptionsSchema.parse({ projectName: "bad name!" }),
@@ -137,115 +81,8 @@ describe("initOptionsSchema", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// providerTypeSchema
-// ---------------------------------------------------------------------------
-
-describe("providerTypeSchema", () => {
-	test("accepts all valid provider types", () => {
-		const validProviders = [
-			"neon",
-			"turso",
-			"planetscale",
-			"supabase",
-			"postgres",
-			"managed",
-		] as const;
-
-		for (const provider of validProviders) {
-			expect(() => providerTypeSchema.parse(provider)).not.toThrow();
-			expect(providerTypeSchema.parse(provider)).toBe(provider);
-		}
-	});
-
-	test("rejects invalid provider types", () => {
-		expect(() => providerTypeSchema.parse("sqlite")).toThrow();
-		expect(() => providerTypeSchema.parse("mysql")).toThrow();
-		expect(() => providerTypeSchema.parse("mongodb")).toThrow();
-		expect(() => providerTypeSchema.parse("")).toThrow();
-		expect(() => providerTypeSchema.parse("NEON")).toThrow();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// getDatabaseLabel
-// ---------------------------------------------------------------------------
-
-describe("getDatabaseLabel", () => {
-	test("returns correct label for neon", () => {
-		expect(getDatabaseLabel("neon")).toBe("Neon (serverless Postgres)");
-	});
-
-	test("returns correct label for turso", () => {
-		expect(getDatabaseLabel("turso")).toBe("Turso (edge SQLite)");
-	});
-
-	test("returns correct label for planetscale", () => {
-		expect(getDatabaseLabel("planetscale")).toBe(
-			"PlanetScale (MySQL-compatible)",
-		);
-	});
-
-	test("returns correct label for supabase", () => {
-		expect(getDatabaseLabel("supabase")).toBe("Supabase (Postgres)");
-	});
-
-	test("returns correct label for postgres", () => {
-		expect(getDatabaseLabel("postgres")).toBe("Raw Postgres");
-	});
-
-	test("returns correct label for managed", () => {
-		expect(getDatabaseLabel("managed")).toBe(
-			"Managed by BetterBase (coming soon)",
-		);
-	});
-
-	test("every known provider has a distinct label", () => {
-		const providers = [
-			"neon",
-			"turso",
-			"planetscale",
-			"supabase",
-			"postgres",
-			"managed",
-		] as const;
-		const labels = providers.map((p) => getDatabaseLabel(p));
-		expect(new Set(labels).size).toBe(providers.length);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// getAuthDialect
-// ---------------------------------------------------------------------------
-
-describe("getAuthDialect", () => {
-	test("returns sqlite for turso", () => {
-		expect(getAuthDialect("turso")).toBe("sqlite");
-	});
-
-	test("returns mysql for planetscale", () => {
-		expect(getAuthDialect("planetscale")).toBe("mysql");
-	});
-
-	test("returns pg for neon", () => {
-		expect(getAuthDialect("neon")).toBe("pg");
-	});
-
-	test("returns pg for postgres", () => {
-		expect(getAuthDialect("postgres")).toBe("pg");
-	});
-
-	test("returns pg for supabase", () => {
-		expect(getAuthDialect("supabase")).toBe("pg");
-	});
-
-	test("returns pg for managed", () => {
-		expect(getAuthDialect("managed")).toBe("pg");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// InitCommandOptions type
+ // ---------------------------------------------------------------------------
+ // InitCommandOptions type
 // ---------------------------------------------------------------------------
 
 describe("InitCommandOptions", () => {
@@ -259,30 +96,11 @@ describe("InitCommandOptions", () => {
 		expect(opts.projectName).toBe("my-app");
 	});
 
-	test("allows iac boolean flag", () => {
-		const optsTrue: InitCommandOptions = { iac: true };
-		const optsFalse: InitCommandOptions = { iac: false };
-		expect(optsTrue.iac).toBe(true);
-		expect(optsFalse.iac).toBe(false);
-	});
-
 	test("validation rejects invalid projectName via initOptionsSchema", () => {
 		const result = initOptionsSchema.safeParse({
 			projectName: "bad name with spaces!",
 		});
 		expect(result.success).toBe(false);
-	});
-
-	test("validation passes with valid combined options", () => {
-		const result = initOptionsSchema.safeParse({
-			projectName: "valid-name",
-			iac: true,
-		});
-		expect(result.success).toBe(true);
-		if (result.success) {
-			expect(result.data.projectName).toBe("valid-name");
-			expect(result.data.iac).toBe(true);
-		}
 	});
 });
 
@@ -317,6 +135,7 @@ describe("runInitCommand (IaC integration)", () => {
 			expect(existsSync(join(projectPath, ".env"))).toBe(true);
 			expect(existsSync(join(projectPath, ".env.example"))).toBe(true);
 			expect(existsSync(join(projectPath, ".gitignore"))).toBe(true);
+			expect(existsSync(join(projectPath, "AGENTS.md"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase.config.ts"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase", "schema.ts"))).toBe(true);
 			expect(existsSync(join(projectPath, "betterbase", "queries", "todos.ts"))).toBe(true);
@@ -330,7 +149,7 @@ describe("runInitCommand (IaC integration)", () => {
 			// Spot-check contents
 			const pkg = JSON.parse(readFileSync(join(projectPath, "package.json"), "utf-8"));
 			expect(pkg.name).toBe(projectName);
-			expect(pkg.scripts.dev).toContain("bun");
+			expect(pkg.scripts.dev).toContain("bb dev");
 
 			const bbConfig = readFileSync(join(projectPath, "betterbase.config.ts"), "utf-8");
 			expect(bbConfig).toContain("defineConfig");
@@ -340,6 +159,12 @@ describe("runInitCommand (IaC integration)", () => {
 
 			const env = readFileSync(join(projectPath, ".env"), "utf-8");
 			expect(env).toContain("DATABASE_URL");
+
+			const agentsMd = readFileSync(join(projectPath, "AGENTS.md"), "utf-8");
+			expect(agentsMd).toContain("BetterBase IaC Operational Constraints");
+			expect(agentsMd).toContain(`Project: ${projectName}`);
+			expect(agentsMd).toContain("## ALLOWED Operations");
+			expect(agentsMd).toContain("## PROHIBITED Operations");
 		} finally {
 			process.chdir(origCwd);
 			await rm(projectPath, { recursive: true, force: true });
