@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { access, mkdir, readdir } from "node:fs/promises";
+import { accessSync } from "node:fs";
+import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { z } from "zod";
@@ -9,11 +10,11 @@ import * as prompts from "../utils/prompts";
 import { withSpinner } from "../utils/spinner";
 import { runGenerateGraphqlCommand } from "./graphql";
 import {
-	calculateChecksum,
-	loadMigrationFiles,
-	getMigrationsTableSql,
 	type AppliedMigration,
 	type MigrationFile,
+	calculateChecksum,
+	getMigrationsTableSql,
+	loadMigrationFiles,
 } from "./migrate-utils";
 
 const migrateOptionsSchema = z.object({
@@ -91,7 +92,7 @@ export async function runMigrateCommand(rawOptions: MigrateCommandOptions): Prom
 	logger.info("drizzle/ files are for preview; running push will apply changes.");
 	const push = await withSpinner(
 		"Applying migration changes...",
-		async () => await runDrizzleKit(["push"], projectRoot),
+		async () => await runDrizzleKit(["push", ...getSqlitePushArgs(projectRoot)], projectRoot),
 		{ successText: "Applied migration changes" },
 	);
 
@@ -125,6 +126,31 @@ function captureIdentifier(match: RegExpMatchArray, startIndex: number): string 
 	return match[startIndex] ?? match[startIndex + 1] ?? match[startIndex + 2] ?? "";
 }
 
+/**
+ * Build the extra drizzle-kit args needed for `push` against a local SQLite
+ * database. The project's drizzle.config.ts may use the legacy `db` field
+ * (which drizzle-kit 0.31 no longer reads for the connection url), so we
+ * derive the url from DB_PATH and pass dialect/schema/url explicitly.
+ */
+function getSqlitePushArgs(projectRoot: string): string[] {
+	const dbPath = process.env.DB_PATH ?? DEFAULT_DB_PATH;
+	const url = dbPath.startsWith("file:") ? dbPath : `file:${dbPath}`;
+
+	const candidateSchemas = ["src/db/schema.ts", "src/schema.ts", "schema.ts"];
+	let schema = candidateSchemas[0];
+	for (const candidate of candidateSchemas) {
+		try {
+			accessSync(path.join(projectRoot, candidate));
+			schema = candidate;
+			break;
+		} catch {
+			// try next candidate
+		}
+	}
+
+	return ["--dialect", "sqlite", "--schema", schema, "--url", url];
+}
+
 async function runDrizzleKit(args: string[], cwd: string = process.cwd()): Promise<DrizzleResult> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), DRIZZLE_TIMEOUT_MS);
@@ -155,7 +181,10 @@ async function runDrizzleKit(args: string[], cwd: string = process.cwd()): Promi
 	}
 }
 
-async function listSqlFiles(baseDir: string, cwd: string = process.cwd()): Promise<Map<string, string>> {
+async function listSqlFiles(
+	baseDir: string,
+	cwd: string = process.cwd(),
+): Promise<Map<string, string>> {
 	const entries = new Map<string, string>();
 	const root = path.join(cwd, baseDir);
 
@@ -328,7 +357,9 @@ async function confirmDestructive(changes: MigrationChange[]): Promise<boolean> 
 	if (destructive.length === 0) return true;
 
 	logger.blank();
-	console.log(chalk.yellow(logger.sym.warn) + " " + chalk.yellow.bold("Destructive operations detected:"));
+	console.log(
+		chalk.yellow(logger.sym.warn) + " " + chalk.yellow.bold("Destructive operations detected:"),
+	);
 	for (const change of destructive) {
 		console.log(
 			`  ${chalk.red(logger.sym.bullet)} ${change.type}: ${change.table}${change.column ? `.${change.column}` : ""}`,
@@ -347,7 +378,9 @@ async function confirmDestructive(changes: MigrationChange[]): Promise<boolean> 
 	return true;
 }
 
-async function backupDatabase(projectRoot: string = process.cwd()): Promise<MigrationBackup | null> {
+async function backupDatabase(
+	projectRoot: string = process.cwd(),
+): Promise<MigrationBackup | null> {
 	const sourcePath = process.env.DB_PATH ?? DEFAULT_DB_PATH;
 
 	try {
@@ -716,7 +749,8 @@ export async function runMigrateHistoryCommand(projectRoot: string): Promise<voi
 				" | " +
 				appliedDate +
 				" | " +
-				m.checksum.slice(0, 12) + "...",
+				m.checksum.slice(0, 12) +
+				"...",
 		);
 	}
 

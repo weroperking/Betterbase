@@ -7,12 +7,12 @@
  * without requiring a real PostgreSQL connection.
  */
 
-import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import path from "node:path";
 import { createTestProject } from "../fixtures/fixtures";
 import type { RLSTestCase, RLSTestResult } from "../../src/commands/rls-test";
 
-// ── Mock state ────────────────────────────────────────────────────────────────
+// ── Mock state ──────────────────────────────────────────────────────
 
 let capturedSqlCalls: string[] = [];
 let capturedDbUrl: string | null = null;
@@ -23,7 +23,7 @@ function resetCaptures() {
   capturedDbUrl = null;
 }
 
-// ── Env helpers ───────────────────────────────────────────────────────────────
+// ── Env helpers ───────────────────────────────────────────────────
 
 function saveEnv() {
   return {
@@ -39,7 +39,7 @@ function restoreEnv(orig: ReturnType<typeof saveEnv>) {
   else delete process.env.DB_URL;
 }
 
-// ── Mock: postgres ────────────────────────────────────────────────────────────
+// ── Mock: postgres (registered per-test to avoid leaking into other files) ──
 
 function createMockSqlClient() {
   const sqlFn: any = (first: any, ...rest: any[]) => {
@@ -80,43 +80,51 @@ const mockPostgresFn = mock((url: string) => {
   return createMockSqlClient();
 });
 
-mock.module("postgres", () => ({
-  default: mockPostgresFn,
-}));
-
-// ── Mock: migrate-utils (getDatabaseType) ─────────────────────────────────────
+// ── Mock: migrate-utils (getDatabaseType) ──────────────────────────
 
 const migrateUtilsPath = path.resolve(
   __dirname,
   "../../src/commands/migrate-utils.ts",
 );
 
-mock.module(migrateUtilsPath, () => ({
-  getDatabaseType: () => mockDbType,
-  calculateChecksum: () => "",
-  parseMigrationFilename: () => null,
-  getMigrationsTableSql: () => "",
-  loadMigrationFiles: async () => [],
-}));
+function registerMocks() {
+  mock.module("postgres", () => ({
+    default: mockPostgresFn,
+  }));
 
-// ── Dynamic import ────────────────────────────────────────────────────────────
+  mock.module(migrateUtilsPath, () => ({
+    getDatabaseType: () => mockDbType,
+    calculateChecksum: () => "",
+    parseMigrationFilename: () => null,
+    getMigrationsTableSql: () => "",
+    loadMigrationFiles: async () => [],
+  }));
+}
+
+// ── Dynamic import ──────────────────────────────────────────────
 
 const { runRLSTestCommand } = await import("../../src/commands/rls-test");
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
 // Tests
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
 
 describe("RLS Test Command", () => {
+  beforeEach(() => {
+    resetCaptures();
+    registerMocks();
+  });
+
   afterEach(() => {
     resetCaptures();
+    mock.restore();
   });
 
   afterAll(() => {
     mock.restore();
   });
 
-  // ── RLSTestCase type (test 11) ──────────────────────────────────────────────
+  // ── RLSTestCase type (test 11) ──────────────────────────────
 
   describe("RLSTestCase type", () => {
     it("has correct shape with all required fields", () => {
@@ -153,7 +161,7 @@ describe("RLS Test Command", () => {
     });
   });
 
-  // ── RLSTestResult type (test 12) ────────────────────────────────────────────
+  // ── RLSTestResult type (test 12) ─────────────────────────────
 
   describe("RLSTestResult type", () => {
     it("has correct shape with all fields", () => {
@@ -194,49 +202,49 @@ describe("RLS Test Command", () => {
     });
   });
 
-  // ── getDatabaseUrl (tests 1–2) ──────────────────────────────────────────────
+  // ── getDatabaseUrl (tests 1–2) ──────────────────────────────
 
-   describe("getDatabaseUrl", () => {
-     it("returns DATABASE_URL when set in env", async () => {
-       const env = saveEnv();
-       process.env.DATABASE_URL = "postgres://localhost:5432/testdb";
-       delete process.env.DB_URL;
-       mockDbType = "postgresql";
+  describe("getDatabaseUrl", () => {
+    it("returns DATABASE_URL when set in env", async () => {
+      const env = saveEnv();
+      process.env.DATABASE_URL = "postgres://localhost:5432/testdb";
+      delete process.env.DB_URL;
+      mockDbType = "postgresql";
 
-       try {
-         try {
-           await runRLSTestCommand("/fake/project", "users");
-         } catch {
-           // Expected — no real DB
-         }
+      try {
+        try {
+          await runRLSTestCommand("/fake/project", "users");
+        } catch {
+          // Expected — no real DB
+        }
 
-         expect(capturedDbUrl).toBe("postgres://localhost:5432/testdb");
-       } finally {
-         restoreEnv(env);
-       }
-     });
+        expect(capturedDbUrl).toBe("postgres://localhost:5432/testdb");
+      } finally {
+        restoreEnv(env);
+      }
+    });
 
-     it("throws when DATABASE_URL is not set", async () => {
-       const env = saveEnv();
-       delete process.env.DATABASE_URL;
-       delete process.env.DB_URL;
-       mockDbType = "postgresql";
+    it("throws when DATABASE_URL is not set", async () => {
+      const env = saveEnv();
+      delete process.env.DATABASE_URL;
+      delete process.env.DB_URL;
+      mockDbType = "postgresql";
 
-       try {
-         await expect(
-           runRLSTestCommand("/fake/project", "users"),
-         ).rejects.toThrow(
-           "DATABASE_URL not found in environment. Please ensure you have a PostgreSQL database configured.",
-         );
+      try {
+        await expect(
+          runRLSTestCommand("/fake/project", "users"),
+        ).rejects.toThrow(
+          "DATABASE_URL not found in environment. Please ensure you have a PostgreSQL database configured.",
+        );
 
-         expect(capturedDbUrl).toBeNull();
-       } finally {
-         restoreEnv(env);
-       }
-     });
-   });
+        expect(capturedDbUrl).toBeNull();
+      } finally {
+        restoreEnv(env);
+      }
+    });
+  });
 
-  // ── loadTablePolicies (tests 3–4) ───────────────────────────────────────────
+  // ── loadTablePolicies (tests 3–4) ────────────────────────────
 
   describe("loadTablePolicies", () => {
     it("returns defaults when no policies directory exists", async () => {
@@ -348,7 +356,7 @@ describe("RLS Test Command", () => {
     });
   });
 
-  // ── generatePolicySQL (tests 5–8) ───────────────────────────────────────────
+  // ── generatePolicySQL (tests 5–8) ────────────────────────────
 
   describe("generatePolicySQL", () => {
     it("generates CREATE POLICY for select only", async () => {
@@ -413,6 +421,7 @@ describe("RLS Test Command", () => {
           s.toUpperCase().includes("CREATE POLICY"),
         );
 
+        // One CREATE POLICY statement is emitted per operation.
         expect(policyStmts.length).toBe(2);
         expect(policyStmts[0]).toContain("FOR SELECT USING (");
         expect(policyStmts[1]).toContain("FOR INSERT WITH CHECK (");
@@ -450,13 +459,18 @@ describe("RLS Test Command", () => {
           s.toUpperCase().includes("CREATE POLICY"),
         );
 
-        expect(policyStmts.length).toBe(1);
-        const combined = policyStmts[0];
-        expect(combined).toContain("FOR SELECT USING (");
-        expect(combined).toContain("FOR INSERT WITH CHECK (");
-        expect(combined).toContain("FOR UPDATE USING (");
-        expect(combined).toContain("FOR DELETE USING (");
-        expect((combined.match(/CREATE POLICY/gi) || []).length).toBe(4);
+        // One CREATE POLICY statement is emitted per operation.
+        expect(policyStmts.length).toBe(4);
+        expect(policyStmts.some((s) => s.includes("FOR SELECT USING ("))).toBe(true);
+        expect(policyStmts.some((s) => s.includes("FOR INSERT WITH CHECK ("))).toBe(true);
+        expect(policyStmts.some((s) => s.includes("FOR UPDATE USING ("))).toBe(true);
+        expect(policyStmts.some((s) => s.includes("FOR DELETE USING ("))).toBe(true);
+        expect(
+          policyStmts.reduce(
+            (acc, s) => acc + (s.match(/CREATE POLICY/gi) || []).length,
+            0,
+          ),
+        ).toBe(4);
       } finally {
         proj.cleanup();
         restoreEnv(env);
@@ -496,7 +510,7 @@ describe("RLS Test Command", () => {
     });
   });
 
-  // ── runRLSTestCommand DB type validation (tests 9–10) ───────────────────────
+  // ── runRLSTestCommand DB type validation (tests 9–10) ──────────
 
   describe("runRLSTestCommand database type validation", () => {
     it("rejects non-PostgreSQL database type", async () => {

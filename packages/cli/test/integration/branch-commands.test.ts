@@ -5,7 +5,7 @@
  * Replaces the 17 stub tests from test/branch-commands.test.ts.
  */
 
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import path from "node:path";
 
 const configModulePath = path.resolve(__dirname, "../../src/utils/config.ts");
@@ -98,6 +98,13 @@ mock.module(configModulePath, () => ({
   findConfigFile: async () => null,
   readConfigFile: async () => null,
 }));
+
+// ── Mock lifecycle hygiene ───────────────────────────────────────────────────
+// After all tests in this file, clear the process-global mock.module registry so
+// the mocked modules cannot leak into sibling test files in a combined run.
+afterAll(() => {
+  mock.restore();
+});
 
 // ── Dynamically import the module under test ────────────────────────────────
 const {

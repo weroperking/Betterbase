@@ -1,4 +1,4 @@
-import { join } from "path";
+import { dirname, join } from "path";
 import { loadSerializedSchema, saveSerializedSchema, serializeSchema } from "@betterbase/core/iac";
 import { diffSchemas, formatDiff } from "@betterbase/core/iac";
 import { generateMigration } from "@betterbase/core/iac";
@@ -12,12 +12,12 @@ import { syncWithServer } from "./server-sync";
 
 export async function runIacSync(
 	projectRoot: string,
-	opts: { 
-		force?: boolean; 
+	opts: {
+		force?: boolean;
 		silent?: boolean;
-		headless?: boolean;          // NEW: Skip interactive prompts
-		autoRegister?: boolean;      // NEW: Auto-register with server
-		environment?: string;        // NEW: Target environment
+		headless?: boolean; // NEW: Skip interactive prompts
+		autoRegister?: boolean; // NEW: Auto-register with server
+		environment?: string; // NEW: Target environment
 	} = {},
 ) {
 	const startTime = Date.now();
@@ -43,9 +43,16 @@ export async function runIacSync(
 	}
 
 	const current = serializeSchema(schema);
-	const previous = loadSerializedSchema(prevFile);
+	const previous = await loadSerializedSchema(prevFile);
 
 	const diff = diffSchemas(previous, current);
+
+	// Always persist the serialized schema snapshot as the source of truth,
+	// even when there are no pending changes (e.g. a first sync with no
+	// previous schema.json). This keeps betterbase/_generated/schema.json in
+	// sync with the current schema.
+	await mkdir(genDir, { recursive: true });
+	await saveSerializedSchema(current, prevFile);
 
 	if (diff.isEmpty && !opts.headless && !opts.autoRegister) {
 		if (!opts.silent) success("Schema is up to date. No changes detected.");
@@ -112,7 +119,7 @@ export async function runIacSync(
 		await syncWithServer(projectRoot, {
 			schema: current,
 			envConfig,
-			environment: opts.environment ?? 'local',
+			environment: opts.environment ?? "local",
 			force: opts.force,
 		});
 
@@ -120,6 +127,7 @@ export async function runIacSync(
 	}
 
 	// 5. Apply migration locally (existing logic)
+	await mkdir(dirname(drizzleOut), { recursive: true });
 	if (opts.silent) {
 		const drizzleCode = generateDrizzleSchema(current, "postgres");
 		await writeFile(drizzleOut, drizzleCode);
@@ -133,9 +141,6 @@ export async function runIacSync(
 			{ successText: "Schema generated" },
 		);
 	}
-
-	await mkdir(genDir, { recursive: true });
-	await saveSerializedSchema(current, prevFile);
 
 	if (!opts.silent) {
 		info("Run the migration runner to apply changes to the database.");

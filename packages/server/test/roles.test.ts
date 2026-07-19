@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { getPool } from "../src/lib/db";
 
 // Mock the db module
@@ -9,6 +9,12 @@ const mockPool = {
 mock.module("../src/lib/db", () => ({
 	getPool: () => mockPool,
 }));
+
+// After all tests in this file, clear the process-global mock.module registry so
+// the mocked module cannot leak into sibling test files in a combined run.
+afterAll(() => {
+	mock.restore();
+});
 
 describe("RBAC schema", () => {
 	beforeEach(() => {

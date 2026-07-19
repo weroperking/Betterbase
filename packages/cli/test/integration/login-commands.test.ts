@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +45,12 @@ function cleanupCredentialsFile() {
 		process.env.BB_CREDENTIALS_DIR = originalBBCredentialsDir;
 	}
 }
+
+// Re-establish the sandbox env var before every test so concurrent
+// execution (and per-describe cleanup) cannot leak the wrong path.
+beforeEach(() => {
+	process.env.BB_CREDENTIALS_DIR = join(tempHomeDir, ".betterbase");
+});
 
 function createValidCredentials() {
 	return {

@@ -1,3 +1,5 @@
+import { mountAutoRest } from "@betterbase/core";
+import { discoverFunctions, setFunctionRegistry } from "@betterbase/core/iac";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -9,6 +11,7 @@ import { allInngestFunctions, inngest } from "./lib/inngest";
 import { runMigrations } from "./lib/migrate";
 import { adminRouter } from "./routes/admin/index";
 import { betterbaseRouter } from "./routes/betterbase/index";
+import { getBunServeConfig } from "./routes/betterbase/ws";
 import { deviceRouter } from "./routes/device/index";
 
 // Validate env first — exits if invalid
@@ -34,6 +37,16 @@ if (env.BETTERBASE_ADMIN_EMAIL && env.BETTERBASE_ADMIN_PASSWORD) {
 
 // App
 const app = new Hono();
+
+// Discover and register betterbase/ IaC functions so /betterbase/* routes resolve
+try {
+	const { join } = await import("node:path");
+	const fns = await discoverFunctions(join(process.cwd(), "betterbase"));
+	setFunctionRegistry(fns);
+	console.log(`[server] Registered ${fns.length} betterbase function(s)`);
+} catch (err) {
+	console.error("[server] Failed to discover betterbase functions:", err);
+}
 
 app.use("*", logger());
 
@@ -90,6 +103,38 @@ app.route("/admin", adminRouter);
 app.route("/device", deviceRouter);
 app.route("/betterbase", betterbaseRouter);
 
+// ─── Auto-REST CRUD mounting ────────────────────────────────────────────────
+// mountAutoRest(app, db, schema) generates /api/:table CRUD routes from a
+// Drizzle schema. This control-plane server is schema-agnostic: per-project
+// schemas (project_<slug>) are provisioned at runtime, and drizzle-orm is not
+// a dependency here. We therefore mount it only if a Drizzle db + schema
+// source is resolvable, and otherwise skip safely without crashing boot.
+try {
+	// A control-plane-level Drizzle schema may be provided via a local module
+	// exporting `db` and `schema` (e.g. ./lib/auto-rest-schema). If absent,
+	// the control-plane is schema-agnostic and we skip safely.
+	const autoRestSchemaPath = "./lib/auto-rest-schema";
+	const autoRestSource = (await import(autoRestSchemaPath).catch(() => null)) as {
+		db?: unknown;
+		schema?: Record<string, unknown>;
+	} | null;
+
+	if (autoRestSource?.db && autoRestSource.schema) {
+		mountAutoRest(app, autoRestSource.db, autoRestSource.schema, {
+			enabled: true,
+			basePath: "/api",
+			enableRLS: true,
+		});
+		console.log("[server] Auto-REST CRUD routes mounted");
+	} else {
+		console.log(
+			"[server] Auto-REST skipped: no Drizzle schema source available in control-plane server",
+		);
+	}
+} catch (err) {
+	console.error("[server] Auto-REST mount failed (skipped):", err);
+}
+
 // 404
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
@@ -100,9 +145,24 @@ app.onError((err, c) => {
 });
 
 const port = Number.parseInt((env as { PORT?: string }).PORT ?? "3000");
-console.log(`[server] Betterbase server running on port ${port}`);
 
-export default {
+// ─── Realtime WebSocket serve config ────────────────────────────────────────
+// getBunServeConfig() returns the Bun.serve options (fetch upgrade path +
+// websocket handler) for the realtime WS. Its fetch is async and resolves to a
+// Response for WS upgrade requests, or `undefined` for non-WS paths — in which
+// case we fall back to the Hono app for everything else.
+const wsConfig = getBunServeConfig();
+
+const server = Bun.serve({
 	port,
-	fetch: app.fetch,
-};
+	async fetch(req: Request, server: unknown) {
+		const wsResponse = await wsConfig.fetch(req, server);
+		if (wsResponse !== undefined) return wsResponse;
+		return app.fetch(req, server as Parameters<typeof app.fetch>[1]);
+	},
+	websocket: wsConfig.websocket,
+});
+
+console.log(`[server] Betterbase server running on port ${server.port}`);
+
+export default server;

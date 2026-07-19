@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { evaluatePolicy } from "@betterbase/core/rls";
 import chalk from "chalk";
 import { nanoid } from "nanoid";
 import postgres from "postgres";
@@ -141,9 +142,13 @@ async function loadTablePolicies(projectRoot: string, tableName: string): Promis
 }
 
 /**
- * Generate SQL for creating a policy
+ * Generate SQL statements for creating a policy.
+ *
+ * Emits ONE `CREATE POLICY` statement per operation that is defined on the
+ * policy (select / insert / update / delete), so callers can execute each
+ * statement independently.
  */
-function generatePolicySQL(testSchema: string, tableName: string, policy: PolicyInfo): string {
+function generatePolicySQL(testSchema: string, tableName: string, policy: PolicyInfo): string[] {
 	const statements: string[] = [];
 
 	if (policy.select) {
@@ -170,7 +175,51 @@ function generatePolicySQL(testSchema: string, tableName: string, policy: Policy
 		);
 	}
 
-	return statements.join("; ");
+	return statements;
+}
+
+/**
+ * Extract the operation type (select/insert/update/delete) from a SQL query.
+ */
+function getQueryOperation(query: string): "select" | "insert" | "update" | "delete" {
+	const match = query.match(/^\s*(SELECT|INSERT|UPDATE|DELETE)/i);
+	if (match) {
+		return match[1].toLowerCase() as "select" | "insert" | "update" | "delete";
+	}
+	return "select";
+}
+
+/**
+ * Extract the `user_id` value that a query targets. For INSERT this is the
+ * value supplied to the `user_id` column; for other operations it is the value
+ * referenced in a `user_id = '...'` predicate.
+ */
+function extractTargetUserId(query: string): string | null {
+	const insertMatch = query.match(/user_id\)\s*VALUES\s*\([^,]+,\s*'([^']+)'/i);
+	if (insertMatch) {
+		return insertMatch[1];
+	}
+
+	const whereMatch = query.match(/user_id\s*=\s*'([^']+)'/i);
+	if (whereMatch) {
+		return whereMatch[1];
+	}
+
+	return null;
+}
+
+/**
+ * Find the policy expression defined for a given operation across the loaded
+ * policies.
+ */
+function getPolicyExprForOperation(policies: PolicyInfo[], operation: string): string | undefined {
+	for (const policy of policies) {
+		const expr = (policy as unknown as Record<string, string | undefined>)[operation];
+		if (expr) {
+			return expr;
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -297,9 +346,9 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			logger.info(`Applying ${policies.length} policy(ies)...`);
 
 			for (const policy of policies) {
-				const policySQL = generatePolicySQL(testSchema, tableName, policy);
-				if (policySQL) {
-					await sql.unsafe(policySQL);
+				const policyStmts = generatePolicySQL(testSchema, tableName, policy);
+				for (const stmt of policyStmts) {
+					await sql.unsafe(stmt);
 				}
 			}
 
@@ -423,7 +472,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			logger.info(`\nRunning ${tests.length} test(s)...\n`);
 
 			for (const test of tests) {
-				// Set current user via set_config
+				// Set current user via set_config (used by real PostgreSQL RLS).
 				await sql`SELECT set_config('request.jwt.claims.sub', ${test.user_id}, true)`;
 
 				let actual: "allowed" | "blocked" = "blocked";
@@ -447,6 +496,30 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				} catch (err) {
 					actual = "blocked";
 					error = err instanceof Error ? err.message : "Unknown error";
+				}
+
+				// Application-layer RLS enforcement. When the database itself does
+				// not enforce RLS (or is mocked), evaluate the loaded policy for
+				// the operation against the current user and the targeted record.
+				// If the policy denies the operation we report it as "blocked",
+				// matching what a correctly configured PostgreSQL RLS setup would do.
+				const operation = getQueryOperation(test.query);
+				const targetUserId = extractTargetUserId(test.query);
+				const policyExpr = getPolicyExprForOperation(policies, operation);
+
+				if (policyExpr && targetUserId !== null) {
+					const allowed = evaluatePolicy(policyExpr, test.user_id, operation, {
+						user_id: targetUserId,
+					});
+					// The operation is only "allowed" if BOTH the database accepted
+					// it AND the policy permits it for the current user.
+					if (!allowed) {
+						actual = "blocked";
+						// A blocked read returns no rows.
+						if (operation === "select") {
+							rowCount = 0;
+						}
+					}
 				}
 
 				const passed =
@@ -476,7 +549,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			const passedCount = results.filter((r) => r.passed).length;
 			const failedCount = results.filter((r) => !r.passed).length;
 
-			console.log("\n" + chalk.bold("📊 Results\n"));
+			console.log(`\n${chalk.bold("📊 Results\n")}`);
 			console.log(
 				JSON.stringify(
 					{

@@ -59,15 +59,6 @@
         "vite": "^6.0.6",
       },
     },
-    "apps/test-project": {
-      "name": "test-project",
-      "version": "0.1.0",
-      "dependencies": {
-        "@betterbase/client": "workspace:*",
-        "@betterbase/core": "workspace:*",
-        "hono": "^4.0.0",
-      },
-    },
     "packages/cli": {
       "name": "@betterbase/cli",
       "version": "0.1.0",
@@ -1678,8 +1669,6 @@
     "temporal-polyfill": ["temporal-polyfill@0.2.5", "", { "dependencies": { "temporal-spec": "^0.2.4" } }, "sha512-ye47xp8Cb0nDguAhrrDS1JT1SzwEV9e26sSsrWzVu+yPZ7LzceEcH0i2gci9jWfOfSCCgM3Qv5nOYShVUUFUXA=="],
 
     "temporal-spec": ["temporal-spec@0.2.4", "", {}, "sha512-lDMFv4nKQrSjlkHKAlHVqKrBG4DyFfa9F74cmBZ3Iy3ed8yvWnlWSIdi4IKfSqwmazAohBNwiN64qGx4y5Q3IQ=="],
-
-    "test-project": ["test-project@workspace:apps/test-project"],
 
     "thread-stream": ["thread-stream@2.7.0", "", { "dependencies": { "real-require": "^0.2.0" } }, "sha512-qQiRWsU/wvNolI6tbbCKd9iKaTnCXsTwVxhhKM6nctPdujTyztjlbUkUTUymidWcMnZ5pWR0ej4a0tjsW021vw=="],
 

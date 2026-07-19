@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { getPool } from "./db";
 
@@ -68,7 +68,12 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
 				entry.userAgent ?? null,
 			],
 		)
-		.catch((err) => console.error("[audit] Failed to write log:", err));
+		.catch((err) =>
+			console.error(
+				"[audit] Failed to write log:",
+				err instanceof Error ? err.message : String(err),
+			),
+		);
 }
 
 // Helper: extract IP from Hono context

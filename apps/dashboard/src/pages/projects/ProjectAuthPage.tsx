@@ -8,13 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { QK } from "@/lib/query-keys";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 
 export default function ProjectAuthPage() {
 	const { projectId } = useParams();
+	const queryClient = useQueryClient();
 	const [config, setConfig] = useState<any>({});
 
 	const { data, isLoading } = useQuery({
@@ -26,6 +27,7 @@ export default function ProjectAuthPage() {
 		mutationFn: (updates: any) => api.patch(`/admin/projects/${projectId}/auth-config`, updates),
 		onSuccess: () => {
 			toast.success("Auth configuration updated");
+			queryClient.invalidateQueries({ queryKey: QK.projectAuthConfig(projectId!) });
 		},
 		onError: (err: any) => toast.error(err.message),
 	});

@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
-import { join } from "path";
 import path from "node:path";
+import { join } from "path";
 import chalk from "chalk";
 import { ContextGenerator } from "../utils/context-generator";
 import { blank, error, info, keyValue, sym, warn } from "../utils/logger";
@@ -10,7 +10,15 @@ import { DevWatcher } from "./dev/watcher";
 import { runIacGenerate } from "./iac/generate";
 import { runIacSync } from "./iac/sync";
 
-export async function runDevCommand(projectRoot: string) {
+export async function runDevCommand(
+	projectRoot: string,
+	deps: {
+		runIacSync?: typeof runIacSync;
+		runIacGenerate?: typeof runIacGenerate;
+	} = {},
+) {
+	const syncIac = deps.runIacSync ?? runIacSync;
+	const generateIac = deps.runIacGenerate ?? runIacGenerate;
 	const hasBetterBase = existsSync(join(projectRoot, "betterbase"));
 	const hasIaC = hasBetterBase;
 
@@ -36,10 +44,10 @@ export async function runDevCommand(projectRoot: string) {
 	// --- Initial generation pass ---
 	if (hasIaC) {
 		info("[iac] Running initial sync...");
-		await runIacSync(projectRoot, { force: false, silent: true }).catch((e: Error) =>
+		await syncIac(projectRoot, { force: false, silent: true }).catch((e: Error) =>
 			warn(`[iac] Initial sync skipped: ${e.message}`),
 		);
-		await runIacGenerate(projectRoot).catch((e: Error) =>
+		await generateIac(projectRoot).catch((e: Error) =>
 			warn(`[iac] Initial generate skipped: ${e.message}`),
 		);
 	}
@@ -65,7 +73,7 @@ export async function runDevCommand(projectRoot: string) {
 				console.log(
 					`  ${chalk.dim(new Date().toLocaleTimeString("en-US", { hour12: false }))} ${chalk.yellow("~")} ${chalk.dim(label)} ${chalk.dim("→ regenerating context")}`,
 				);
-				const result = await runIacSync(projectRoot, { force: false, silent: false }).catch(
+				const result = await syncIac(projectRoot, { force: false, silent: false }).catch(
 					(e: Error) => {
 						warn(`[iac] ${e.message}`);
 						return null;
@@ -79,7 +87,7 @@ export async function runDevCommand(projectRoot: string) {
 
 			case "function": {
 				info(`[iac] Function changed: ${label}`);
-				await runIacGenerate(projectRoot).catch((e: Error) => warn(`[iac] ${e.message}`));
+				await generateIac(projectRoot).catch((e: Error) => warn(`[iac] ${e.message}`));
 				await pm.restart("function file changed");
 				break;
 			}
@@ -105,7 +113,8 @@ export async function runDevCommand(projectRoot: string) {
 
 		// Regenerate context on every change
 		const startedAt = Date.now();
-		ctxGen.generate(projectRoot)
+		ctxGen
+			.generate(projectRoot)
 			.then(() => {
 				const elapsed = Date.now() - startedAt;
 				console.log(
@@ -113,7 +122,7 @@ export async function runDevCommand(projectRoot: string) {
 				);
 			})
 			.catch((e: Error) => {
-			warn(`Context regeneration failed: ${e.message}`);
+				warn(`Context regeneration failed: ${e.message}`);
 			});
 	});
 
