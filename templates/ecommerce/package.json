@@ -1,0 +1,16 @@
+{
+  "name": "my-betterbase-ecommerce",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev":   "bb dev",
+    "sync":  "bb iac sync",
+    "diff":  "bb iac diff",
+    "gen":   "bb iac generate"
+  },
+  "dependencies": {
+    "@betterbase/core":   "workspace:*",
+    "@betterbase/client": "workspace:*",
+    "hono": "^4.0.0"
+  }
+}

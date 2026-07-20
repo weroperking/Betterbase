@@ -1,6 +1,6 @@
 import { ProjectEnvironment } from "./env-detector";
-import { createApiClient } from "../utils/api-client";
-import { isAuthenticated } from "../utils/credentials";
+import { createApiClient } from "../../utils/api-client";
+import { isAuthenticated } from "../../utils/credentials";
 import { SerializedSchema } from "@betterbase/core/iac";
 
 export interface SyncWithServerOptions {

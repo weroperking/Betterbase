@@ -36,6 +36,26 @@ export {
 } from "./planetscale";
 export { SupabaseProviderAdapter, createSupabaseProvider } from "./supabase";
 export { PostgresProviderAdapter, createPostgresProvider } from "./postgres";
+export {
+	ManagedProviderAdapter,
+	createManagedProvider,
+} from "./managed";
+export {
+	GuardrailEngine,
+	GuardrailViolationError,
+	createGuardrailEngine,
+	TenantModeSchema,
+	TenantModeProviderSchema,
+	type TenantMode,
+	type TenantModeProvider,
+	type EnforceOptions,
+} from "./guardrail";
+export {
+	SetTenantModeRequestSchema,
+	toTenantModeStatus,
+	type SetTenantModeRequest,
+	type TenantModeStatus,
+} from "./tenant-mode";
 
 import type { ProviderType } from "@betterbase/shared";
 import { NeonProviderAdapter } from "./neon";

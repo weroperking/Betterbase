@@ -1,5 +1,11 @@
 import { nanoid } from "nanoid";
 import type { Pool } from "pg";
+import {
+	GuardrailEngine,
+	GuardrailViolationError,
+	type EnforceOptions,
+	type TenantMode,
+} from "../providers/guardrail";
 
 // ─── Query Builder (chainable) ─────────────────────────────────────────────
 
@@ -145,10 +151,25 @@ export class DatabaseReader {
 	constructor(
 		protected _pool: Pool,
 		protected _schema: string,
+		/** Optional guardrail engine for tenant-mode enforcement. */
+		protected _guardrail?: GuardrailEngine | null,
+		/** Active tenant id for this context (when tenant-scoped). */
+		protected _tenantId?: string,
+		/** Tables exempt from tenant scoping. */
+		protected _tenantExemptTables: string[] = [],
 	) {}
+
+	/** Build tenant-scoped enforcement options for a given table. */
+	protected _enforceOpts(table: string): EnforceOptions {
+		return {
+			tenantId: this._tenantId,
+			exemptTables: this._tenantExemptTables,
+		};
+	}
 
 	/** Get a document by ID */
 	async get<T = unknown>(table: string, id: string): Promise<T | null> {
+		this._guardrail?.enforceRead(table, this._enforceOpts(table));
 		const { rows } = await this._pool.query(
 			`SELECT * FROM "${this._schema}"."${table}" WHERE _id = $1 LIMIT 1`,
 			[id],
@@ -158,6 +179,7 @@ export class DatabaseReader {
 
 	/** Start a query builder for a table */
 	query<T = unknown>(table: string): IaCQueryBuilder<T> {
+		this._guardrail?.enforceRead(table, this._enforceOpts(table));
 		return new IaCQueryBuilder<T>(table, this._pool, this._schema);
 	}
 
@@ -259,6 +281,7 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Insert a document, returning its generated ID */
 	async insert(table: string, data: Record<string, unknown>): Promise<string> {
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		const id = nanoid();
 		const now = new Date();
 		const doc = { ...data, _id: id, _createdAt: now, _updatedAt: now };
@@ -283,6 +306,7 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Partial update — merges provided fields, updates `_updatedAt` */
 	async patch(table: string, id: string, fields: Record<string, unknown>): Promise<void> {
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		const updates = Object.entries(fields)
 			.map(([k], i) => `"${k}" = $${i + 2}`)
 			.join(", ");
@@ -301,6 +325,7 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Delete a document by ID */
 	async delete(table: string, id: string): Promise<void> {
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		await this._pool.query(`DELETE FROM "${this._schema}"."${table}" WHERE _id = $1`, [id]);
 		this._emitChange(table, "DELETE", id);
 	}
@@ -330,5 +355,63 @@ export class DatabaseWriter extends DatabaseReader {
 		// Emit to the global realtime manager (IAC-21)
 		const mgr = (globalThis as any).__betterbaseRealtimeManager;
 		mgr?.emitTableChange?.({ table, type, id });
+	}
+}
+
+// ─── DbContext (tenant-aware) ──────────────────────────────────────────────
+
+/**
+ * Tenant-aware database context.
+ *
+ * Wraps a {@link DatabaseReader} / {@link DatabaseWriter} pair and, when tenant
+ * mode is configured, enforces tenant scoping on every read/write via the
+ * {@link GuardrailEngine}. When no guardrail engine is active (tenant mode off)
+ * everything passes through unchanged — fully backwards compatible.
+ */
+export class DbContext {
+	readonly reader: DatabaseReader;
+	readonly writer: DatabaseWriter;
+
+	constructor(
+		pool: Pool,
+		schema: string,
+		options?: {
+			guardrail?: GuardrailEngine | null;
+			tenantId?: string;
+			tenantExemptTables?: string[];
+		},
+	) {
+		const { guardrail = null, tenantId, tenantExemptTables = [] } = options ?? {};
+		this.reader = new DatabaseReader(
+			pool,
+			schema,
+			guardrail,
+			tenantId,
+			tenantExemptTables,
+		);
+		this.writer = new DatabaseWriter(
+			pool,
+			schema,
+			guardrail,
+			tenantId,
+			tenantExemptTables,
+		);
+	}
+
+	/**
+	 * Return a new context bound to a tenant. The returned context enforces the
+	 * tenant id on all subsequent reads/writes. The original context is
+	 * unaffected.
+	 */
+	asTenant(tenantId: string): DbContext {
+		return new DbContext(
+			(this.reader as any)._pool,
+			(this.reader as any)._schema,
+			{
+				guardrail: (this.reader as any)._guardrail ?? null,
+				tenantId,
+				tenantExemptTables: (this.reader as any)._tenantExemptTables ?? [],
+			},
+		);
 	}
 }

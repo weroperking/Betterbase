@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod";
 import { type CronJob, cron, getCronJobs } from "../src/iac/cron";
-import { DatabaseReader, DatabaseWriter } from "../src/iac/db-context";
+import { DatabaseReader, DatabaseWriter, DbContext } from "../src/iac/db-context";
+import {
+	GuardrailEngine,
+	TenantModeSchema,
+} from "../src/providers/guardrail";
+import { PostgresProviderAdapter } from "../src/providers/index";
 import {
 	discoverFunctions,
 	getFunctionRegistry,
@@ -484,6 +489,42 @@ describe("DatabaseReader", () => {
 
 		expect(reader.get).toBeInstanceOf(Function);
 		expect(reader.query).toBeInstanceOf(Function);
+	});
+});
+
+describe("DbContext tenant guardrails", () => {
+	test("DbContext enforces tenant scoping on writes via guardrail engine", () => {
+		const mockPool = { query: async () => ({ rows: [] }) } as any;
+		const adapter = new PostgresProviderAdapter();
+		const engine = new GuardrailEngine(
+			adapter,
+			TenantModeSchema.parse({ enabled: true }),
+		);
+		const ctx = new DbContext(mockPool, "public", { guardrail: engine });
+
+		expect(() => ctx.writer.insert("invoices", { amount: 10 })).toThrow();
+		// A tenant-bound context satisfies scoping.
+		expect(() =>
+			ctx.asTenant("t1").writer.insert("invoices", { amount: 10 }),
+		).not.toThrow();
+	});
+
+	test("ctx.asTenant binds a tenant id so writes pass", () => {
+		const mockPool = { query: async () => ({ rows: [] }) } as any;
+		const engine = new GuardrailEngine(
+			new PostgresProviderAdapter(),
+			TenantModeSchema.parse({ enabled: true }),
+		);
+		const ctx = new DbContext(mockPool, "public", { guardrail: engine });
+		const scoped = ctx.asTenant("t1");
+
+		expect(() => scoped.writer.insert("invoices", { amount: 10 })).not.toThrow();
+	});
+
+	test("DbContext without guardrail is backwards-compatible passthrough", () => {
+		const mockPool = { query: async () => ({ rows: [] }) } as any;
+		const ctx = new DbContext(mockPool, "public");
+		expect(() => ctx.writer.insert("invoices", { amount: 10 })).not.toThrow();
 	});
 });
 
