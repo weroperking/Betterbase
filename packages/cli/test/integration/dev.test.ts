@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createTestProject } from "../fixtures/fixtures";
@@ -60,80 +60,81 @@ const processManagerPath = path.resolve(__dirname, "../../src/commands/dev/proce
 const watcherPath = path.resolve(__dirname, "../../src/commands/dev/watcher.ts");
 const queryLogPath = path.resolve(__dirname, "../../src/commands/dev/query-log.ts");
 const contextGenPath = path.resolve(__dirname, "../../src/utils/context-generator.ts");
-const iacGenPath = path.resolve(__dirname, "../../src/commands/iac/generate.ts");
-const iacSyncPath = path.resolve(__dirname, "../../src/commands/iac/sync.ts");
 
-mock.module(processManagerPath, () => ({
-	ProcessManager: class {
-		async start() {
-			processManagerStarted = true;
-		}
-		async stop() {
-			processManagerStopped = true;
-		}
-		async restart(_reason: string) {
-			processManagerRestartCount++;
-		}
-	},
-}));
-
-mock.module(watcherPath, () => ({
-	DevWatcher: class {
-		on(_handler: unknown) {
-			return this;
-		}
-		start(_projectRoot: string) {
-			watcherStarted = true;
-		}
-		stop() {
-			watcherStopped = true;
-		}
-	},
-}));
-
-mock.module(queryLogPath, () => {
-	const queryLogMock = {
-		enable() {
-			queryLogEnabled = true;
-		},
-		disable() {
-			queryLogDisabled = true;
-		},
-		log(_entry: unknown) {},
-		getEntries() {
-			return [];
-		},
-		clear() {},
-	};
-	return { queryLog: queryLogMock, QueryLog: class {} };
-});
-
-mock.module(contextGenPath, () => ({
-	ContextGenerator: class {
-		async generate(_projectRoot: string) {
-			contextGenerated = true;
-			if (contextGenerateShouldThrow) {
-				throw new Error(contextGenerateError || "Simulated generation failure");
+function registerMocks() {
+	mock.module(processManagerPath, () => ({
+		ProcessManager: class {
+			async start() {
+				processManagerStarted = true;
 			}
-			return {};
-		}
-	},
-}));
+			async stop() {
+				processManagerStopped = true;
+			}
+			async restart(_reason: string) {
+				processManagerRestartCount++;
+			}
+		},
+	}));
 
-mock.module(iacGenPath, () => ({
-	runIacGenerate: async () => {
-		iacGenerateCalled = true;
-	},
-}));
+	mock.module(watcherPath, () => ({
+		DevWatcher: class {
+			on(_handler: unknown) {
+				return this;
+			}
+			start(_projectRoot: string) {
+				watcherStarted = true;
+			}
+			stop() {
+				watcherStopped = true;
+			}
+		},
+	}));
 
-mock.module(iacSyncPath, () => ({
-	runIacSync: async () => {
-		iacSyncCalled = true;
-	},
-}));
+	mock.module(queryLogPath, () => {
+		const queryLogMock = {
+			enable() {
+				queryLogEnabled = true;
+			},
+			disable() {
+				queryLogDisabled = true;
+			},
+			log(_entry: unknown) {},
+			getEntries() {
+				return [];
+			},
+			clear() {},
+		};
+		return { queryLog: queryLogMock, QueryLog: class {} };
+	});
 
-// ── Dynamic import after mocks registered ─────────────────────────────────────────
+	mock.module(contextGenPath, () => ({
+		ContextGenerator: class {
+			async generate(_projectRoot: string) {
+				contextGenerated = true;
+				if (contextGenerateShouldThrow) {
+					throw new Error(contextGenerateError || "Simulated generation failure");
+				}
+				return {};
+			}
+		},
+	}));
+}
+
+// ── Dynamic import after mocks registered ─────────────────────────────
 const { runDevCommand } = await import("../../src/commands/dev");
+
+// Inject lightweight iac stubs so the real iac command modules are never
+// mocked at the process level (which would leak into other test files).
+async function runDevCommandInjected(projectRoot: string) {
+	return runDevCommand(projectRoot, {
+		runIacSync: async () => {
+			iacSyncCalled = true;
+		},
+		runIacGenerate: async () => {
+			iacGenerateCalled = true;
+		},
+	});
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 describe("runDevCommand", () => {
@@ -141,9 +142,10 @@ describe("runDevCommand", () => {
 	let baselineSIGINT: ((...args: any[]) => void)[];
 	let baselineSIGTERM: ((...args: any[]) => void)[];
 
-beforeEach(() => {
-	resetMockState();
-	// Clean up any leftover project from previous test
+	beforeEach(() => {
+		resetMockState();
+		registerMocks();
+		// Clean up any leftover project from previous test
 	if (currentProject) {
 		currentProject.cleanup();
 		currentProject = null;
@@ -155,8 +157,9 @@ beforeEach(() => {
 	baselineSIGTERM = process.listeners("SIGTERM") as ((...args: any[]) => void)[];
 });
 
-afterEach(() => {
-	// Remove only handlers added during the test
+	afterEach(() => {
+		mock.restore();
+		// Remove only handlers added during the test
 	const currentSIGINT = process.listeners("SIGINT") as ((...args: any[]) => void)[];
 	const currentSIGTERM = process.listeners("SIGTERM") as ((...args: any[]) => void)[];
 	for (const fn of currentSIGINT) {
@@ -176,6 +179,10 @@ afterEach(() => {
 	restoreEnv(envBackup);
 });
 
+afterAll(() => {
+	mock.restore();
+});
+
 	// 1 ──────────────────────────────────────────────────────────────────────────────
 	it("creates cleanup function", async () => {
 		currentProject = createTestProject({
@@ -184,7 +191,7 @@ afterEach(() => {
 			"src/db/schema.ts": "export const users = {};\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(cleanup).toBeFunction();
 		expect(processManagerStarted).toBe(true);
@@ -201,7 +208,7 @@ afterEach(() => {
 			"betterbase/schema.ts": "export default {};\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(iacSyncCalled).toBe(true);
 		expect(iacGenerateCalled).toBe(true);
@@ -216,7 +223,7 @@ afterEach(() => {
 			"src/index.ts": "export default { port: 0, fetch: () => {} };\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(iacSyncCalled).toBe(false);
 		expect(iacGenerateCalled).toBe(false);
@@ -232,7 +239,7 @@ afterEach(() => {
 			"src/index.ts": "export default { port: 0, fetch: () => {} };\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(queryLogEnabled).toBe(true);
 		expect(queryLogDisabled).toBe(false);
@@ -249,7 +256,7 @@ afterEach(() => {
 			"src/index.ts": "export default { port: 0, fetch: () => {} };\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(queryLogEnabled).toBe(false);
 
@@ -258,7 +265,7 @@ afterEach(() => {
 
 	// 6 ──────────────────────────────────────────────────────────────────────────────
 	it("validates project root exists", async () => {
-		const cleanup = await runDevCommand("/nonexistent/path/12345");
+		const cleanup = await runDevCommandInjected("/nonexistent/path/12345");
 
 		expect(cleanup).toBeFunction();
 
@@ -271,7 +278,7 @@ afterEach(() => {
 			"src/index.ts": "export default { port: 0, fetch: () => {} };\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		await expect(cleanup()).resolves.toBeUndefined();
 
@@ -288,7 +295,7 @@ afterEach(() => {
 			"src/index.ts": "export default { port: 0, fetch: () => {} };\n",
 		});
 
-		const cleanup = await runDevCommand(currentProject.root);
+		const cleanup = await runDevCommandInjected(currentProject.root);
 
 		expect(watcherStarted).toBe(true);
 		expect(processManagerStarted).toBe(true);

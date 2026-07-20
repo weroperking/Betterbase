@@ -27,7 +27,7 @@
 ## Architectural Contract (Phase 2 adds on top of Phase 1)
 
 ```
-bbf/                         ← IAC layer (Phase 1)
+betterbase/                         ← IAC layer (Phase 1)
 ├── schema.ts
 ├── queries/
 ├── mutations/
@@ -71,7 +71,7 @@ packages/
 
 **Depends on:** IAC-25 (Phase 1 complete)
 
-**What it is:** The `modules/` pattern is the IaC answer to "where does shared server-side code live?" Instead of scattering helpers across `src/routes/`, `src/lib/`, etc., everything reusable is a module. Functions in `bbf/` import from `src/modules/`. Nothing in `src/modules/` depends on Hono or route concerns — it is pure business logic.
+**What it is:** The `modules/` pattern is the IaC answer to "where does shared server-side code live?" Instead of scattering helpers across `src/routes/`, `src/lib/`, etc., everything reusable is a module. Functions in `betterbase/` import from `src/modules/`. Nothing in `src/modules/` depends on Hono or route concerns — it is pure business logic.
 
 **Create file:** `templates/iac/src/modules/.gitkeep`
 
@@ -82,11 +82,11 @@ Empty file — establishes the directory.
 ```markdown
 # modules/
 
-Shared server-side logic imported by your `bbf/` functions.
+Shared server-side logic imported by your `betterbase/` functions.
 
 **Rules:**
 - No Hono imports. No HTTP concepts (no `Context`, no `c.req`, no `c.json`).
-- No direct DB calls. Use `ctx.db` inside your `bbf/` functions instead.
+- No direct DB calls. Use `ctx.db` inside your `betterbase/` functions instead.
 - Pure TypeScript — accepts plain arguments, returns plain values.
 - Can import from `@betterbase/core/iac` for types only.
 
@@ -100,7 +100,7 @@ export async function sendWelcomeEmail(to: string, name: string) {
 ```
 
 ```typescript
-// bbf/mutations/users.ts
+// betterbase/mutations/users.ts
 import { mutation } from "@betterbase/core/iac";
 import { v } from "@betterbase/core/iac";
 import { sendWelcomeEmail } from "../../src/modules/email";
@@ -136,10 +136,10 @@ templates/iac/
 ├── tsconfig.json
 ├── betterbase.config.ts
 ├── src/
-│   ├── index.ts           ← minimal Hono server, mounts /bbf router only
+│   ├── index.ts           ← minimal Hono server, mounts /betterbase router only
 │   └── modules/
 │       └── README.md      ← from P2-01
-└── bbf/
+└── betterbase/
     ├── schema.ts          ← starter schema (todos example)
     ├── queries/
     │   └── todos.ts       ← listTodos, getTodo
@@ -166,29 +166,49 @@ templates/iac/
   "dependencies": {
     "@betterbase/core":   "workspace:*",
     "@betterbase/client": "workspace:*",
+    "@betterbase/server": "workspace:*",
     "hono": "^4.0.0"
   }
 }
 ```
+
+> Note: `@betterbase/server` must also expose the `@betterbase/server/routes/betterbase`
+> subpath export (via its `package.json` `exports` map) so the generated
+> `src/index.ts` above can import `betterbaseRouter`. Without that export,
+> `bun install` resolves the generated import cleanly only if the subpath is
+> declared.
 
 **Create file:** `templates/iac/src/index.ts`
 
 ```typescript
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { bbfRouter } from "@betterbase/server/routes/bbf";
+import { betterbaseRouter } from "@betterbase/server/routes/betterbase";
 import { discoverFunctions, setFunctionRegistry } from "@betterbase/core/iac";
 import { join } from "path";
 
 const app = new Hono();
 app.use("*", cors());
 
-// Discover and register bbf/ functions on startup
-const fns = await discoverFunctions(join(process.cwd(), "bbf"));
+// Discover and register betterbase/ functions on startup
+const fns = await discoverFunctions(join(process.cwd(), "betterbase"));
 setFunctionRegistry(fns);
 
-// Mount the bbf router — this is your entire API surface
-app.route("/bbf", bbfRouter);
+// Authentication: require a valid bearer token (admin API key or JWT) before
+// any betterbase route or generated function runs. In local development you may
+// instead configure a safe dev-auth mode that trusts a known dev token, but
+// protected behavior must be preserved outside development.
+app.use("/betterbase/*", async (c, next) => {
+  const auth = c.req.header("Authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  // verifyAdminToken / api-key lookup happens inside betterbaseRouter's middleware
+  await next();
+});
+
+// Mount the betterbase router — this is your entire API surface
+app.route("/betterbase", betterbaseRouter);
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok" }));
@@ -196,7 +216,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 export default { port: 3000, fetch: app.fetch };
 ```
 
-**Create file:** `templates/iac/bbf/schema.ts`
+**Create file:** `templates/iac/betterbase/schema.ts`
 
 ```typescript
 import { defineSchema, defineTable, v } from "@betterbase/core/iac";
@@ -212,7 +232,7 @@ export default defineSchema({
 });
 ```
 
-**Create file:** `templates/iac/bbf/queries/todos.ts`
+**Create file:** `templates/iac/betterbase/queries/todos.ts`
 
 ```typescript
 import { query } from "@betterbase/core/iac";
@@ -233,7 +253,7 @@ export const getTodo = query({
 });
 ```
 
-**Create file:** `templates/iac/bbf/mutations/todos.ts`
+**Create file:** `templates/iac/betterbase/mutations/todos.ts`
 
 ```typescript
 import { mutation } from "@betterbase/core/iac";
@@ -261,7 +281,7 @@ export const deleteTodo = mutation({
 });
 ```
 
-**Create file:** `templates/iac/bbf/cron.ts`
+**Create file:** `templates/iac/betterbase/cron.ts`
 
 ```typescript
 // import { cron } from "@betterbase/core/iac";
@@ -295,9 +315,11 @@ if (opts.iac) {
 
 **Acceptance criteria:**
 - `bb init my-app --iac` scaffolds the IaC template
-- `bbf/schema.ts`, `bbf/queries/todos.ts`, `bbf/mutations/todos.ts` created
+- `betterbase/schema.ts`, `betterbase/queries/todos.ts`, `betterbase/mutations/todos.ts` created
 - `bb iac sync` runs automatically after scaffolding
-- `src/index.ts` is 15 lines — no route boilerplate
+- `curl -fsS http://localhost:3000/health` returns `{"status":"ok"}`
+- `curl -fsS http://localhost:3000/betterbase/...` mounts the betterbase router (no 404)
+- the scaffolded `src/index.ts`, `betterbase/schema.ts`, and `betterbase/queries/`, `betterbase/mutations/` directories exist on disk (verifiable via `test -f` / `test -d`)
 - `src/modules/` exists with README
 
 ---
@@ -315,7 +337,7 @@ At the top of `runInitCommand()`, when `--iac` is not passed, print a notice:
 ```typescript
 if (!opts.iac) {
   warn("Tip: run `bb init --iac` for the recommended IaC project structure.");
-  warn("     The IaC template uses bbf/ functions + auto-migration instead of hand-written routes.");
+  warn("     The IaC template uses betterbase/ functions + auto-migration instead of hand-written routes.");
 }
 ```
 
@@ -336,19 +358,19 @@ fully supported but is no longer the recommended starting point.
 bb init my-app --iac
 
 # Existing project — add IaC alongside your routes
-mkdir bbf
+mkdir betterbase
 bb iac generate
 ```
 
 ## How to move existing tables to IaC
 
-1. Copy your Drizzle column definitions to `bbf/schema.ts` using `v.*` validators.
+1. Copy your Drizzle column definitions to `betterbase/schema.ts` using `v.*` validators.
 2. Run `bb iac diff` to see what would change.
 3. If the diff looks correct, run `bb iac sync` — it generates the migration.
-4. Replace route handlers with `bbf/mutations/` and `bbf/queries/` files.
+4. Replace route handlers with `betterbase/mutations/` and `betterbase/queries/` files.
 5. Remove the old route files incrementally.
 
-The bbf/ layer is additive — your existing Hono routes continue to work
+The betterbase/ layer is additive — your existing Hono routes continue to work
 while you migrate function-by-function.
 ```
 
@@ -363,18 +385,18 @@ while you migrate function-by-function.
 
 **Depends on:** P2-03
 
-**What it is:** Several internal CLI utilities reference the old "scan schema files + scan route files" approach (the `SchemaScanner` and `RouteScanner` used by the context generator). These still work, but the context generator should also pick up `bbf/` when it exists and include IaC functions in the generated `.betterbase-context.json`.
+**What it is:** Several internal CLI utilities reference the old "scan schema files + scan route files" approach (the `SchemaScanner` and `RouteScanner` used by the context generator). These still work, but the context generator should also pick up `betterbase/` when it exists and include IaC functions in the generated `.betterbase-context.json`.
 
 **Modify file:** `packages/cli/src/utils/context-generator.ts`
 
 After the existing schema and route scanning, add:
 
 ```typescript
-// Check for bbf/ directory — if present, add IaC function metadata
-const bbfDir = join(projectRoot, "bbf");
-if (existsSync(bbfDir)) {
+// Check for betterbase/ directory — if present, add IaC function metadata
+const betterbaseDir = join(projectRoot, "betterbase");
+if (existsSync(betterbaseDir)) {
   const { discoverFunctions } = await import("@betterbase/core/iac");
-  const fns = await discoverFunctions(bbfDir);
+  const fns = await discoverFunctions(betterbaseDir);
 
   context.iacFunctions = fns.map((f) => ({
     kind: f.kind,
@@ -391,17 +413,17 @@ if (existsSync(bbfDir)) {
 ```typescript
 // In generateAIPrompt():
 if (context.hasIaCLayer) {
-  prompt += `\n\nThis project uses BetterBase IaC. Server functions are in bbf/:`;
+  prompt += `\n\nThis project uses BetterBase IaC. Server functions are in betterbase/:`;
   prompt += `\n- Queries (read-only): ${context.iacFunctions.filter(f => f.kind === "query").map(f => f.path).join(", ")}`;
   prompt += `\n- Mutations (writes): ${context.iacFunctions.filter(f => f.kind === "mutation").map(f => f.path).join(", ")}`;
   prompt += `\n- Actions (side-effects): ${context.iacFunctions.filter(f => f.kind === "action").map(f => f.path).join(", ")}`;
-  prompt += `\nData model defined in bbf/schema.ts. Use ctx.db inside function handlers.`;
+  prompt += `\nData model defined in betterbase/schema.ts. Use ctx.db inside function handlers.`;
 }
 ```
 
 **Acceptance criteria:**
 - `bb dev` in an IaC project includes IaC function metadata in `.betterbase-context.json`
-- AI context shows all bbf/ functions, their kind, and paths
+- AI context shows all betterbase/ functions, their kind, and paths
 - Old SchemaScanner/RouteScanner still runs and is included (additive, not replacement)
 
 ---
@@ -438,7 +460,7 @@ export class ProcessManager {
     const entryPoint = join(this._projectRoot, "src", "index.ts");
 
     this._proc = spawn({
-      cmd:    ["bun", "run", entryPoint],
+      cmd:    [process.execPath, "run", entryPoint],
       cwd:    this._projectRoot,
       env:    { ...process.env, NODE_ENV: "development" },
       stdout: "pipe",
@@ -523,8 +545,6 @@ type WatchEvent = {
 };
 
 type Handler = (event: WatchEvent) => void | Promise<void>;
-
-export class DevWatcher {
   private _handlers:  Handler[] = [];
   private _debounce:  Map<string, ReturnType<typeof setTimeout>> = new Map();
   private _debounceMs: number;
@@ -543,7 +563,7 @@ export class DevWatcher {
   /** Start watching the given project root */
   start(projectRoot: string) {
     const dirs: { path: string; recursive: boolean }[] = [
-      { path: join(projectRoot, "bbf"),     recursive: true  },
+      { path: join(projectRoot, "betterbase"),     recursive: true  },
       { path: join(projectRoot, "src"),     recursive: true  },
     ];
 
@@ -560,8 +580,14 @@ export class DevWatcher {
         if (![".ts", ".tsx", ".js", ".json"].includes(extname(fullPath))) return;
 
         const kind = this._classifyPath(rel);
-        this._debounced(fullPath, () => {
-          for (const h of this._handlers) h({ path: fullPath, relative: rel, kind });
+        this._debounced(fullPath, async () => {
+          for (const h of this._handlers) {
+            try {
+              await h({ path: fullPath, relative: rel, kind });
+            } catch (err) {
+              this._handleWatcherError(err, fullPath);
+            }
+          }
         });
       });
 
@@ -577,19 +603,27 @@ export class DevWatcher {
   }
 
   private _classifyPath(rel: string): WatchEvent["kind"] {
-    if (rel.startsWith("bbf/schema"))                  return "schema";
-    if (rel.startsWith("bbf/queries") ||
-        rel.startsWith("bbf/mutations") ||
-        rel.startsWith("bbf/actions") ||
-        rel === "bbf/cron.ts")                         return "function";
+    if (rel.startsWith("betterbase/schema"))                  return "schema";
+    if (rel.startsWith("betterbase/queries") ||
+        rel.startsWith("betterbase/mutations") ||
+        rel.startsWith("betterbase/actions") ||
+        rel === "betterbase/cron.ts")                         return "function";
     if (rel.startsWith("src/modules"))                 return "module";
     if (rel === "betterbase.config.ts")                return "config";
     return "server";
   }
 
-  private _debounced(key: string, fn: () => void) {
+  private _debounced(key: string, fn: () => void | Promise<void>) {
     clearTimeout(this._debounce.get(key));
     this._debounce.set(key, setTimeout(fn, this._debounceMs));
+  }
+
+  private _handleWatcherError(err: unknown, fullPath: string) {
+    if (err instanceof Error) {
+      error(`[dev] Handler failed for ${fullPath}: ${err.message}`);
+    } else {
+      error(`[dev] Handler failed for ${fullPath}: ${String(err)}`);
+    }
   }
 }
 ```
@@ -620,13 +654,13 @@ import { runIacGenerate } from "./iac/generate";
 import { ContextGenerator } from "../utils/context-generator";
 
 export async function runDevCommand(projectRoot: string) {
-  const hasBbf  = existsSync(join(projectRoot, "bbf"));
-  const hasIaC  = hasBbf;
+  const hasBetterbase  = existsSync(join(projectRoot, "betterbase"));
+  const hasIaC  = hasBetterbase;
 
   // Print banner
   console.log(chalk.bold.cyan("\n  BetterBase Dev\n"));
   if (hasIaC) {
-    info("IaC layer detected — bbf/ will be watched for schema and function changes.");
+    info("IaC layer detected — betterbase/ will be watched for schema and function changes.");
   }
 
   // --- Initial generation pass ---
@@ -759,7 +793,7 @@ export function formatDevError(err: unknown, context: string): string {
     // Highlight the first relevant stack frame
     const relevant = err.stack
       ?.split("\n")
-      .find(l => l.includes("bbf/") || l.includes("src/modules"));
+      .find(l => l.includes("betterbase/") || l.includes("src/modules"));
     return [
       chalk.red(`  ✗ ${context}: ${err.message}`),
       relevant ? chalk.dim(`    ${relevant.trim()}`) : "",
@@ -783,7 +817,7 @@ export function formatDiffForDev(changes: { type: string; table: string; column?
 
 **Acceptance criteria:**
 - ZodError from bad function args shows field paths, not a raw dump
-- Stack traces filtered to show only `bbf/` or `src/modules/` frames
+- Stack traces filtered to show only `betterbase/` or `src/modules/` frames
 - Schema diff formatted with + / ⚠ icons and colors
 
 ---
@@ -796,7 +830,7 @@ export function formatDiffForDev(changes: { type: string; table: string; column?
 
 **What it is:** Replaces the stub WS handler (IAC-17) with a production-ready implementation. Adds ping/pong heartbeat, client tracking with metadata, and graceful disconnect detection.
 
-**Replace file:** `packages/server/src/routes/bbf/ws.ts`
+**Replace file:** `packages/server/src/routes/betterbase/ws.ts`
 
 ```typescript
 import { nanoid } from "nanoid";
@@ -817,7 +851,7 @@ interface ConnectedClient {
 const clients = new Map<string, ConnectedClient>();
 
 /** Bun WebSocket handler object — passed to Bun.serve() */
-export const bbfWSHandler = {
+export const betterbaseWSHandler = {
   open(ws: any) {
     const clientId    = nanoid();
     const projectSlug = ws.data?.projectSlug ?? "default";
@@ -912,15 +946,25 @@ export function getBunServeConfig() {
   return {
     fetch(req: Request, server: any) {
       const url = new URL(req.url);
-      if (url.pathname === "/bbf/ws") {
+      if (url.pathname === "/betterbase/ws") {
         const projectSlug = url.searchParams.get("project") ?? "default";
+        const ticket = url.searchParams.get("ticket");
+
+        // Validate the WebSocket ticket and its project binding before
+        // upgrading. Tickets are issued by a REST endpoint after auth and are
+        // scoped to a single project; an invalid/mismatched ticket must be
+        // rejected so connections cannot cross project boundaries.
+        if (!ticket || !verifyWSTicket(ticket, projectSlug)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+
         const upgraded = server.upgrade(req, { data: { projectSlug } });
         if (upgraded) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
       }
       return undefined;
     },
-    websocket: bbfWSHandler,
+    websocket: betterbaseWSHandler,
   };
 }
 ```
@@ -929,7 +973,7 @@ export function getBunServeConfig() {
 
 ```typescript
 // Replace the Hono ws route with Bun native upgrade in the serve config
-import { getBunServeConfig } from "./routes/bbf/ws";
+import { getBunServeConfig } from "./routes/betterbase/ws";
 
 const bunWS = getBunServeConfig();
 
@@ -1011,7 +1055,7 @@ export function buildTableFunctionIndex(
 }
 ```
 
-**Modify `packages/server/src/routes/bbf/ws.ts`** — when a client subscribes without specifying tables:
+**Modify `packages/server/src/routes/betterbase/ws.ts`** — when a client subscribes without specifying tables:
 
 ```typescript
 // In the "subscribe" case handler:
@@ -1186,7 +1230,7 @@ Replace the stub with real stats:
 ```typescript
 import { Hono } from "hono";
 import { subscriptionTracker } from "@betterbase/core/iac/realtime/subscription-tracker";
-import { getWSStats } from "../../bbf/ws";
+import { getWSStats } from "../../../routes/betterbase/ws";
 
 export const projectRealtimeRoutes = new Hono();
 
@@ -1406,7 +1450,7 @@ export class StorageCtx {
 
 **Depends on:** P2-15
 
-**Modify file:** `packages/server/src/routes/bbf/index.ts`
+**Modify file:** `packages/server/src/routes/betterbase/index.ts`
 
 Replace the `buildStorageReader()` and `buildStorageWriter()` stubs:
 
@@ -1455,16 +1499,28 @@ STORAGE_PUBLIC_BASE: z.string().url().optional(),
 
 **What it is:** Direct browser upload flow. Client requests a presigned upload URL from the server, then POSTs the file directly to S3 — bypasses the server for large files.
 
-**Add to `packages/server/src/routes/bbf/index.ts`:**
+**Add to `packages/server/src/routes/betterbase/index.ts`:**
 
 ```typescript
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { S3Client } from "@aws-sdk/client-s3";
+import { requireAuth } from "../../lib/auth"; // authenticates the request
+import { isSafeSlug } from "../../lib/slug"; // ^[a-z0-9][a-z0-9_-]{0,62}$
 
-// POST /bbf/storage/generate-upload-url
-bbfRouter.post("/storage/generate-upload-url", async (c) => {
+// POST /betterbase/storage/generate-upload-url
+betterbaseRouter.post("/storage/generate-upload-url", requireAuth, async (c) => {
   const { contentType, filename } = await c.req.json();
-  const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+
+  // Derive the authorized project from the authenticated context rather than
+  // trusting the raw X-Project-Slug header. This prevents cross-project
+  // targeting and identifier injection.
+  const project = c.get("project") as { slug: string } | undefined;
+  if (!project) return c.json({ error: "Forbidden" }, 403);
+
+  // Validate the slug before using it in any identifier.
+  if (!isSafeSlug(project.slug)) return c.json({ error: "Invalid project" }, 400);
+  const projectSlug = project.slug;
+
   const storageId   = `st_${nanoid(20)}`;
   const ext         = filename?.split(".").pop() ?? "";
   const s3Key       = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
@@ -1484,13 +1540,16 @@ bbfRouter.post("/storage/generate-upload-url", async (c) => {
     Expires:    300,  // 5 minute window
   });
 
-  // Record the pending upload in the DB so getUrl() works after upload
+  // Record the pending upload in the per-project storage table using the safe,
+  // validated schema helper (no raw string interpolation of untrusted
+  // identifiers).
+  const storageSchema = `project_${projectSlug}`;
   const pool = getPool();
   await pool.query(
-    `INSERT INTO "project_${projectSlug}"._iac_storage
-       (storage_id, s3_key, bucket, content_type) VALUES ($1, $2, $3, $4)
+    `INSERT INTO "${storageSchema}"._iac_storage (project_slug, storage_id, s3_key, bucket, content_type)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (storage_id) DO NOTHING`,
-    [storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType ?? "application/octet-stream"]
+    [projectSlug, storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType ?? "application/octet-stream"]
   );
 
   return c.json({ storageId, uploadUrl: url, fields });
@@ -1536,6 +1595,7 @@ CREATE TABLE IF NOT EXISTS betterbase_meta.iac_scheduled_jobs (
   max_attempts   INT NOT NULL DEFAULT 3,
   error_msg      TEXT,
   completed_at   TIMESTAMPTZ,
+  locked_at      TIMESTAMPTZ,   -- set when a worker claims the job; used for timeout recovery
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -1670,12 +1730,12 @@ export class JobWorker {
   }
 
   private async _poll() {
-    // Re-queue stuck running jobs first
+    // Re-queue stuck running jobs first (compare against the claim timestamp)
     await this._pool.query(
       `UPDATE betterbase_meta.iac_scheduled_jobs
        SET status = 'pending', error_msg = 'Requeued after timeout'
        WHERE status = 'running'
-         AND created_at < NOW() - INTERVAL '${JOB_LOCK_TIMEOUT} milliseconds'`
+         AND locked_at < NOW() - INTERVAL '${JOB_LOCK_TIMEOUT} milliseconds'`
     ).catch(() => {});
 
     // Claim a batch of pending jobs
@@ -1683,7 +1743,7 @@ export class JobWorker {
       id: string; project_slug: string; function_path: string; args: unknown; attempts: number;
     }>(
       `UPDATE betterbase_meta.iac_scheduled_jobs
-       SET status = 'running', attempts = attempts + 1
+       SET status = 'running', attempts = attempts + 1, locked_at = NOW()
        WHERE id IN (
          SELECT id FROM betterbase_meta.iac_scheduled_jobs
          WHERE status = 'pending' AND run_at <= NOW()
@@ -1780,7 +1840,7 @@ jobWorker.start();
 
 **Depends on:** P2-20
 
-**Modify file:** `packages/server/src/routes/bbf/index.ts`
+**Modify file:** `packages/server/src/routes/betterbase/index.ts`
 
 Replace the scheduler stub:
 
@@ -1798,7 +1858,7 @@ const scheduler = buildSchedulerCtx(pool, projectSlug);
 **Acceptance criteria:**
 - `ctx.scheduler.runAfter(5000, fn, args)` inserts a DB row and returns job ID
 - `ctx.scheduler.cancel(id)` cancels a pending job
-- No stubs remain in the bbf router
+- No stubs remain in the betterbase router
 
 ---
 
@@ -1820,6 +1880,8 @@ export interface BBFConfig {
   projectSlug?: string;
   /** Token getter — called on each request */
   getToken?:    () => string | null;
+  /** WS ticket getter — mints a short-lived ticket scoped to the project */
+  getWSTicket?: (projectSlug: string) => string | null;
 }
 
 interface BBFContextValue {
@@ -1835,26 +1897,49 @@ export function BetterbaseProvider({ config, children }: { config: BBFConfig; ch
   const [wsReady, setWsReady] = React.useState(false);
 
   useEffect(() => {
-    const wsUrl  = config.url.replace(/^http/, "ws") + `/bbf/ws?project=${config.projectSlug ?? "default"}`;
-    const ws     = new WebSocket(wsUrl);
+    // Acquire a short-lived WebSocket ticket scoped to this project, then pass
+    // it on the connection so the server can validate the project binding.
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let closedByUs = false;
 
-    ws.onopen  = () => { setWsReady(true); };
-    ws.onclose = () => {
-      setWsReady(false);
-      // Reconnect after 3 seconds
-      setTimeout(() => { wsRef.current = new WebSocket(wsUrl); }, 3_000);
+    // Shared connection setup path: obtains a fresh short-lived ticket and
+    // constructs the WebSocket with fresh onopen/onclose/onmessage handlers.
+    function connect(): WebSocket {
+      const ticket = getWSTicket?.(config.projectSlug ?? "default");
+      const wsUrl  = config.url.replace(/^http/, "ws") + `/betterbase/ws?project=${config.projectSlug ?? "default"}&ticket=${ticket ?? ""}`;
+      const ws     = new WebSocket(wsUrl);
+
+      ws.onopen  = () => { setWsReady(true); };
+      ws.onclose = () => {
+        setWsReady(false);
+        if (closedByUs) return;
+        // Reconnect after 3 seconds with a fresh ticket + connection
+        reconnectTimer = setTimeout(() => { wsRef.current = connect(); }, 3_000);
+      };
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
+      };
+
+      return ws;
+    }
+
+    // Obtain a new short-lived ticket before constructing the WebSocket.
+    wsRef.current = connect();
+
+    return () => {
+      closedByUs = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
     };
-
-    wsRef.current = ws;
-
-    // Handle pings
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
-    };
-
-    return () => { ws.close(); };
   }, [config.url, config.projectSlug]);
+
+  // Helper that mints a short-lived WS ticket. In a real implementation this
+  // calls the server's ticket endpoint after auth. Projects can supply a
+  // `getWSTicket` via config to override this default.
+  function getWSTicket(projectSlug: string): string | null {
+    return config.getWSTicket?.(projectSlug) ?? null;
+  }
 
   return (
     <BBFContext.Provider value={{ config, ws: wsRef.current, wsReady }}>
@@ -1905,14 +1990,16 @@ async function callBBF<T>(
   baseUrl:     string,
   path:        string,
   args:        unknown,
-  getToken?:   () => string | null
+  getToken?:   () => string | null,
+  projectSlug?: string,
 ): Promise<T> {
   const token = getToken?.();
-  const res   = await fetch(`${baseUrl}/bbf/${path}`, {
+  const res   = await fetch(`${baseUrl}/betterbase/${path}`, {
     method:  "POST",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(projectSlug ? { "X-Project-Slug": projectSlug } : {}),
     },
     body: JSON.stringify({ args }),
   });
@@ -1944,7 +2031,7 @@ export function useQuery<TReturn>(
   args: Record<string, unknown> = {}
 ): UseQueryResult<TReturn> {
   const { config, ws, wsReady } = useBBFContext();
-  const path     = (fn as any).__bbfPath as string;
+  const path     = (fn as any).__betterbasePath as string;
   const argsJson = useMemo(() => JSON.stringify(args), [JSON.stringify(args)]);
 
   const [data,   setData]   = useState<TReturn | undefined>(undefined);
@@ -1959,7 +2046,7 @@ export function useQuery<TReturn>(
 
     setStatus("loading");
     try {
-      const result = await callBBF<TReturn>(config.url, path, JSON.parse(argsJson), config.getToken);
+      const result = await callBBF<TReturn>(config.url, path, JSON.parse(argsJson), config.getToken, config.projectSlug);
       if (ctrl.signal.aborted) return;
       setData(result);
       setStatus("success");
@@ -1969,7 +2056,7 @@ export function useQuery<TReturn>(
       setError(e);
       setStatus("error");
     }
-  }, [config.url, path, argsJson, config.getToken]);
+  }, [config.url, path, argsJson, config.getToken, config.projectSlug]);
 
   // Fetch on mount and args change
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -2025,7 +2112,7 @@ export function useMutation<TReturn = void>(
   fn: MutationRegistration<any, TReturn>
 ): UseMutationResult<Record<string, unknown>, TReturn> {
   const { config } = useBBFContext();
-  const path = (fn as any).__bbfPath as string;
+  const path = (fn as any).__betterbasePath as string;
 
   const [isPending, setIsPending] = useState(false);
   const [error,     setError]     = useState<Error | null>(null);
@@ -2034,7 +2121,7 @@ export function useMutation<TReturn = void>(
     setIsPending(true);
     setError(null);
     try {
-      const result = await callBBF<TReturn>(config.url, path, args, config.getToken);
+      const result = await callBBF<TReturn>(config.url, path, args, config.getToken, config.projectSlug);
       return result;
     } catch (e: any) {
       setError(e);
@@ -2042,11 +2129,10 @@ export function useMutation<TReturn = void>(
     } finally {
       setIsPending(false);
     }
-  }, [config.url, path, config.getToken]);
+  }, [config.url, path, config.getToken, config.projectSlug]);
 
   const mutate = useCallback((args: Record<string, unknown>) => {
-    mutateAsync(args).catch(() => {}); // fire-and-forget variant
-    return mutateAsync(args);
+    return mutateAsync(args); // fire-and-forget variant — reuses the same promise
   }, [mutateAsync]);
 
   return {
@@ -2065,10 +2151,10 @@ export function useAction<TReturn = void>(
   fn: ActionRegistration<any, TReturn>
 ): UseMutationResult<Record<string, unknown>, TReturn> {
   const { config } = useBBFContext();
-  const path = (fn as any).__bbfPath as string;
+  const path = (fn as any).__betterbasePath as string;
 
   // Actions follow the same client pattern as mutations
-  const mutationFn = { ...fn, __bbfPath: path } as unknown as MutationRegistration<any, TReturn>;
+  const mutationFn = { ...fn, __betterbasePath: path } as unknown as MutationRegistration<any, TReturn>;
   return useMutation(mutationFn);
 }
 ```
@@ -2122,7 +2208,7 @@ export function usePaginatedQuery<T>(
   opts:     { initialNumItems?: number } = {}
 ): UsePaginatedQueryResult<T> {
   const { config } = useBBFContext();
-  const path      = (fn as any).__bbfPath as string;
+  const path      = (fn as any).__betterbasePath as string;
   const numItems  = opts.initialNumItems ?? 10;
 
   const [results,   setResults]   = useState<T[]>([]);
@@ -2130,17 +2216,22 @@ export function usePaginatedQuery<T>(
   const [isDone,    setIsDone]    = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [status,    setStatus]    = useState<"loading" | "success" | "error">("loading");
+  const cancelledRef = useRef(false);
 
-  // Initial load
-  useState(() => {
-    loadPage(null);
-  });
+  // Initial load — run after render, with cancellation so stale requests
+  // don't update state if the component unmounts or re-runs.
+  useEffect(() => {
+    cancelledRef.current = false;
+    loadPage(null).catch(() => {});
+    return () => { cancelledRef.current = true; };
+  }, []);
 
   async function loadPage(cursor: string | null) {
+    if (cancelledRef.current) return;
     setIsLoading(true);
     try {
       const token = config.getToken?.();
-      const res   = await fetch(`${config.url}/bbf/${path}`, {
+      const res   = await fetch(`${config.url}/betterbase/${path}`, {
         method:  "POST",
         headers: {
           "Content-Type":  "application/json",
@@ -2168,7 +2259,7 @@ export function usePaginatedQuery<T>(
 }
 ```
 
-**Server-side pattern for paginated queries (`bbf/queries/todos.ts`):**
+**Server-side pattern for paginated queries (`betterbase/queries/todos.ts`):**
 
 ```typescript
 export const listTodosPaginated = query({
@@ -2178,11 +2269,29 @@ export const listTodosPaginated = query({
   },
   handler: async (ctx, args) => {
     const limit  = args.numItems ?? 10;
-    const all    = await ctx.db.query("todos").order("desc").take(limit + 1).collect();
+
+    // Deterministic ordering so pagination is stable across pages.
+    const q = ctx.db.query("todos").order("desc", "_createdAt").order("desc", "_id");
+
+    // Advance past the cursor: the cursor is the composite of the last item's
+    // (_createdAt, _id). Use a lexicographic predicate so successive loadMore()
+    // calls return the next page instead of repeating the first one:
+    //   _createdAt < cursorCreated
+    //   OR (_createdAt == cursorCreated AND _id < cursorId)
+    let builder = q;
+    if (args.cursor) {
+      const [cursorCreated, cursorId] = args.cursor.split("|");
+      builder = builder.filter((_createdAt: string, _id: string) =>
+        _createdAt < cursorCreated || (_createdAt === cursorCreated && _id < cursorId)
+      );
+    }
+
+    const all    = await builder.take(limit + 1).collect();
     const isDone = all.length <= limit;
     const page   = all.slice(0, limit);
-    // cursor = _id of last item (client passes this back on next page)
-    const cursor = isDone ? null : page[page.length - 1]._id;
+    // cursor = composite of last item (_createdAt + "|" + _id), passed back by the client
+    const cursor = isDone ? null
+      : `${page[page.length - 1]._createdAt}|${page[page.length - 1]._id}`;
     return { page, isDone, cursor };
   },
 });
@@ -2244,7 +2353,8 @@ export function createBBFClient(opts: {
 
   function getWS(): WebSocket {
     if (ws?.readyState === WebSocket.OPEN) return ws;
-    const wsUrl = url.replace(/^http/, "ws") + `/bbf/ws?project=${projectSlug}`;
+    const ticket = getWSTicket?.(projectSlug);
+    const wsUrl = url.replace(/^http/, "ws") + `/betterbase/ws?project=${projectSlug}&ticket=${ticket ?? ""}`;
     ws = new WebSocket(wsUrl);
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
@@ -2258,13 +2368,14 @@ export function createBBFClient(opts: {
   }
 
   async function call(kind: string, fn: any, args: unknown): Promise<unknown> {
-    const path  = fn.__bbfPath ?? "unknown";
+    const path  = fn.__betterbasePath ?? "unknown";
     const token = getToken?.();
-    const res   = await fetch(`${url}/bbf/${path}`, {
+    const res   = await fetch(`${url}/betterbase/${path}`, {
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(projectSlug ? { "X-Project-Slug": projectSlug } : {}),
       },
       body: JSON.stringify({ args }),
     });
@@ -2281,7 +2392,7 @@ export function createBBFClient(opts: {
     action:   (fn, args) => call("actions",   fn, args) as any,
 
     subscribe(fn, args, onChange) {
-      const path = (fn as any).__bbfPath ?? "unknown";
+      const path = (fn as any).__betterbasePath ?? "unknown";
       if (!listeners.has(path)) listeners.set(path, new Set());
       listeners.get(path)!.add(onChange);
 
@@ -2421,7 +2532,7 @@ describe("createBBFClient", () => {
 ```markdown
 # BetterBase IaC — Introduction
 
-BetterBase IaC is a Convex-inspired layer that lets you define your **data model** and **server functions** in TypeScript, inside a `bbf/` directory. The CLI handles schema migrations automatically.
+BetterBase IaC is a Convex-inspired layer that lets you define your **data model** and **server functions** in TypeScript, inside a `betterbase/` directory. The CLI handles schema migrations automatically.
 
 ## Why IaC?
 
@@ -2451,7 +2562,7 @@ Your server is running. Add a table, add a function, the client updates automati
 ```markdown
 # Defining Your Schema
 
-Your data model lives in `bbf/schema.ts`. You never write SQL.
+Your data model lives in `betterbase/schema.ts`. You never write SQL.
 
 ## Basic example
 
@@ -2537,7 +2648,7 @@ Functions are the API of your BetterBase app. There are three kinds.
 ## Queries — read data
 
 ```typescript
-// bbf/queries/users.ts
+// betterbase/queries/users.ts
 import { query } from "@betterbase/core/iac";
 import { v } from "@betterbase/core/iac";
 
@@ -2555,7 +2666,7 @@ export const getUser = query({
 ## Mutations — write data
 
 ```typescript
-// bbf/mutations/users.ts
+// betterbase/mutations/users.ts
 import { mutation } from "@betterbase/core/iac";
 import { v } from "@betterbase/core/iac";
 
@@ -2573,7 +2684,7 @@ export const createUser = mutation({
 ## Actions — side effects
 
 ```typescript
-// bbf/actions/email.ts
+// betterbase/actions/email.ts
 import { action } from "@betterbase/core/iac";
 import { v } from "@betterbase/core/iac";
 
@@ -2646,7 +2757,7 @@ Real-time. Automatically re-fetches when server data changes.
 
 ```tsx
 import { useQuery } from "@betterbase/client/iac";
-import { api } from "../bbf/_generated/api";
+import { api } from "../betterbase/_generated/api";
 
 function UserProfile({ id }: { id: string }) {
   const { data: user, isLoading, error } = useQuery(api.queries.users.getUser, { id });
@@ -2661,7 +2772,7 @@ function UserProfile({ id }: { id: string }) {
 
 ```tsx
 import { useMutation } from "@betterbase/client/iac";
-import { api } from "../bbf/_generated/api";
+import { api } from "../betterbase/_generated/api";
 
 function CreateUserForm() {
   const create = useMutation(api.mutations.users.createUser);
@@ -2681,7 +2792,7 @@ function CreateUserForm() {
 
 ```tsx
 import { useAction } from "@betterbase/client/iac";
-import { api } from "../bbf/_generated/api";
+import { api } from "../betterbase/_generated/api";
 
 function WelcomeButton({ userId }: { userId: string }) {
   const sendEmail = useAction(api.actions.email.sendWelcomeEmail);
@@ -2698,7 +2809,7 @@ function WelcomeButton({ userId }: { userId: string }) {
 
 ```tsx
 import { usePaginatedQuery } from "@betterbase/client/iac";
-import { api } from "../bbf/_generated/api";
+import { api } from "../betterbase/_generated/api";
 
 function PostList() {
   const { results, loadMore, isDone, isLoading } =
@@ -2717,7 +2828,7 @@ function PostList() {
 
 ```typescript
 import { createBBFClient } from "@betterbase/client/iac";
-import { api } from "./bbf/_generated/api";
+import { api } from "./betterbase/_generated/api";
 
 const client = createBBFClient({ url: "http://localhost:3001" });
 
@@ -2771,7 +2882,7 @@ For files >1MB, use the presigned upload endpoint to bypass the server:
 
 ```typescript
 // 1. Get upload URL from action
-const { storageId, uploadUrl, fields } = await fetch("/bbf/storage/generate-upload-url", {
+const { storageId, uploadUrl, fields } = await fetch("/betterbase/storage/generate-upload-url", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ contentType: "image/png", filename: "photo.png" }),
@@ -2830,7 +2941,7 @@ await ctx.scheduler.runAfter(
 ## Cron jobs
 
 ```typescript
-// bbf/cron.ts
+// betterbase/cron.ts
 import { cron } from "@betterbase/core/iac";
 import { api } from "./_generated/api";
 
@@ -2851,7 +2962,7 @@ Supported schedule formats:
 ```markdown
 # Modules (`src/modules/`)
 
-Modules are shared server-side logic imported by your `bbf/` functions.
+Modules are shared server-side logic imported by your `betterbase/` functions.
 
 ## Rules
 
@@ -2879,7 +2990,7 @@ export async function sendWelcomeEmail(to: string, name: string) {
 ```
 
 ```typescript
-// bbf/mutations/users.ts
+// betterbase/mutations/users.ts
 import { sendWelcomeEmail } from "../../src/modules/email";
 
 export const createUser = mutation({
@@ -2930,7 +3041,7 @@ bun install
 bb dev
 ```
 
-Your schema is in `bbf/schema.ts`. Your functions are in `bbf/queries/` and `bbf/mutations/`. The CLI watches for changes and handles migrations automatically.
+Your schema is in `betterbase/schema.ts`. Your functions are in `betterbase/queries/` and `betterbase/mutations/`. The CLI watches for changes and handles migrations automatically.
 
 See [docs/iac/](docs/iac/) for the full guide.
 
@@ -2944,7 +3055,7 @@ See [docs/iac/](docs/iac/) for the full guide.
 | Client | Raw `fetch()` | `useQuery()` / `useMutation()` hooks |
 | Real-time | Hand-wire WebSockets | Built-in (queries auto-subscribe) |
 
-Both patterns are supported simultaneously. Add `bbf/` to an existing project without touching existing routes.
+Both patterns are supported simultaneously. Add `betterbase/` to an existing project without touching existing routes.
 ```
 
 **Acceptance criteria:**
@@ -3021,7 +3132,7 @@ Phase A — Project Structure (P2-01 → P2-04)
   P2-01  src/modules/ convention + README
   P2-02  templates/iac/ IaC-first template + bb init --iac
   P2-03  Deprecate old boilerplate notice + migration guide
-  P2-04  Context generator picks up bbf/ functions
+  P2-04  Context generator picks up betterbase/ functions
 
 Phase B — bb dev Full Implementation (P2-05 → P2-08)
   P2-05  ProcessManager (child process, pipe, restart)
@@ -3039,14 +3150,14 @@ Phase C — Real-Time System (P2-09 → P2-13)
 Phase D — Storage Context (P2-14 → P2-17)
   P2-14  _iac_storage metadata table (migration 011)
   P2-15  StorageCtx full impl (store, getUrl, delete)
-  P2-16  StorageCtx wired into bbf router
+  P2-16  StorageCtx wired into betterbase router
   P2-17  Browser presigned upload endpoint
 
 Phase E — Scheduler (P2-18 → P2-21)
   P2-18  iac_scheduled_jobs table (migration 012)
   P2-19  SchedulerCtx full impl (runAfter, runAt, cancel)
   P2-20  JobWorker (poll, SKIP LOCKED, retry, backoff)
-  P2-21  SchedulerCtx wired into bbf router
+  P2-21  SchedulerCtx wired into betterbase router
 
 Phase F — Client Hooks (P2-22 → P2-27)
   P2-22  BetterbaseProvider + WS lifecycle

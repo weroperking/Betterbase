@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 
 // Mock the inngest module
 const mockInngestCreateFunction = mock(() => ({
@@ -34,6 +34,12 @@ const mockPool = {
 mock.module("../src/lib/db", () => ({
 	getPool: () => mockPool,
 }));
+
+// After all tests in this file, clear the process-global mock.module registry so
+// the mocked modules cannot leak into sibling test files in a combined run.
+afterAll(() => {
+	mock.restore();
+});
 
 describe("Inngest client", () => {
 	beforeEach(() => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createTestProject } from "./fixtures/fixtures";
@@ -63,100 +63,109 @@ const contextGenPath = path.resolve(__dirname, "../src/utils/context-generator.t
 const iacGenPath = path.resolve(__dirname, "../src/commands/iac/generate.ts");
 const iacSyncPath = path.resolve(__dirname, "../src/commands/iac/sync.ts");
 
-mock.module(processManagerPath, () => ({
-	ProcessManager: class {
-		async start() {
-			processManagerStarted = true;
-		}
-		async stop() {
-			processManagerStopped = true;
-		}
-		async restart(_reason: string) {
-			processManagerRestartCount++;
-		}
-	},
-}));
-
-mock.module(watcherPath, () => ({
-	DevWatcher: class {
-		on(_handler: unknown) {
-			return this;
-		}
-		start(_projectRoot: string) {
-			watcherStarted = true;
-		}
-		stop() {
-			watcherStopped = true;
-		}
-	},
-}));
-
-mock.module(queryLogPath, () => {
-	const queryLogMock = {
-		enable() {
-			queryLogEnabled = true;
-		},
-		disable() {
-			queryLogDisabled = true;
-		},
-		log(_entry: unknown) {},
-		getEntries() {
-			return [];
-		},
-		clear() {},
-	};
-	return { queryLog: queryLogMock, QueryLog: class {} };
-});
-
-mock.module(contextGenPath, () => ({
-	ContextGenerator: class {
-		async generate(_projectRoot: string) {
-			contextGenerated = true;
-			return {};
-		}
-	},
-}));
-
-mock.module(iacGenPath, () => ({
-	runIacGenerate: async () => {
-		if (iacGenerateShouldThrow) {
-			throw new Error(iacGenerateError || "IAC generate failure");
-		}
-		iacGenerateCalled = true;
-	},
-}));
-
-mock.module(iacSyncPath, () => ({
-	runIacSync: async () => {
-		if (iacSyncShouldThrow) {
-			throw new Error(iacSyncError || "IAC sync failure");
-		}
-		iacSyncCalled = true;
-	},
-}));
-
 // ── Dynamic import after mocks registered ─────────────────────────────────────────
-const { runDevCommand } = await import("../src/commands/dev");
+// Module under test is imported lazily inside beforeEach so the mock.module
+// registrations (also applied in beforeEach) are active at resolution time.
+// This keeps the process-global mock.module registry clean for sibling files
+// (restored in afterEach) instead of leaking a top-level mock across the run.
+let runDevCommand: (projectRoot: string, injected?: any) => Promise<any>;
+
+function registerMocks() {
+	mock.module(processManagerPath, () => ({
+		ProcessManager: class {
+			async start() {
+				processManagerStarted = true;
+			}
+			async stop() {
+				processManagerStopped = true;
+			}
+			async restart(_reason: string) {
+				processManagerRestartCount++;
+			}
+		},
+	}));
+
+	mock.module(watcherPath, () => ({
+		DevWatcher: class {
+			on(_handler: unknown) {
+				return this;
+			}
+			start(_projectRoot: string) {
+				watcherStarted = true;
+			}
+			stop() {
+				watcherStopped = true;
+			}
+		},
+	}));
+
+	mock.module(queryLogPath, () => {
+		const queryLogMock = {
+			enable() {
+				queryLogEnabled = true;
+			},
+			disable() {
+				queryLogDisabled = true;
+			},
+			log(_entry: unknown) {},
+			getEntries() {
+				return [];
+			},
+			clear() {},
+		};
+		return { queryLog: queryLogMock, QueryLog: class {} };
+	});
+
+	mock.module(contextGenPath, () => ({
+		ContextGenerator: class {
+			async generate(_projectRoot: string) {
+				contextGenerated = true;
+				return {};
+			}
+		},
+	}));
+
+	mock.module(iacGenPath, () => ({
+		runIacGenerate: async () => {
+			if (iacGenerateShouldThrow) {
+				throw new Error(iacGenerateError || "IAC generate failure");
+			}
+			iacGenerateCalled = true;
+		},
+	}));
+
+	mock.module(iacSyncPath, () => ({
+		runIacSync: async () => {
+			if (iacSyncShouldThrow) {
+				throw new Error(iacSyncError || "IAC sync failure");
+			}
+			iacSyncCalled = true;
+		},
+	}));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 describe("runDevCommand", () => {
 	let envBackup: ReturnType<typeof saveEnv>;
-	let baselineSIGINT: Function[];
-	let baselineSIGTERM: Function[];
+	let baselineSIGINT: ((...args: any[]) => void)[];
+	let baselineSIGTERM: ((...args: any[]) => void)[];
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		registerMocks();
+		({ runDevCommand } = await import("../src/commands/dev"));
 		resetMockState();
 		envBackup = saveEnv();
 		delete process.env.QUERY_LOG;
 		process.env.NODE_ENV = "test";
-		baselineSIGINT = process.listeners("SIGINT") as Function[];
-		baselineSIGTERM = process.listeners("SIGTERM") as Function[];
+		baselineSIGINT = process.listeners("SIGINT") as ((...args: any[]) => void)[];
+		baselineSIGTERM = process.listeners("SIGTERM") as ((...args: any[]) => void)[];
 	});
 
 	afterEach(() => {
+		mock.restore();
 		// Remove only handlers added during the test
-		const currentSIGINT = process.listeners("SIGINT") as Function[];
-		const currentSIGTERM = process.listeners("SIGTERM") as Function[];
+		const currentSIGINT = process.listeners("SIGINT") as ((...args: any[]) => void)[];
+		const currentSIGTERM = process.listeners("SIGTERM") as ((...args: any[]) => void)[];
 		for (const fn of currentSIGINT) {
 			if (!baselineSIGINT.includes(fn)) {
 				process.removeListener("SIGINT", fn);
@@ -168,6 +177,10 @@ describe("runDevCommand", () => {
 			}
 		}
 		restoreEnv(envBackup);
+	});
+
+	afterAll(() => {
+		mock.restore();
 	});
 
 	// 1 ──────────────────────────────────────────────────────────────────────────────

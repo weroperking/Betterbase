@@ -69,7 +69,7 @@ export class IaCQueryBuilder<T = unknown> {
 
 	async first(): Promise<T | null> {
 		const { sql, params } = this._buildSQL();
-		const { rows } = await this._pool.query(sql + " LIMIT 1", params as any[]);
+		const { rows } = await this._pool.query(`${sql} LIMIT 1`, params as any[]);
 		return (rows[0] as T) ?? null;
 	}
 
@@ -276,8 +276,20 @@ export class DatabaseReader {
 
 // ─── DatabaseWriter ──────────────────────────────────────────────────────────
 
+export type ChangeHook = (
+	table: string,
+	type: "INSERT" | "UPDATE" | "DELETE",
+	data: Record<string, unknown> | { _id: string },
+) => void | Promise<void>;
+
 export class DatabaseWriter extends DatabaseReader {
 	private _mutations: (() => Promise<void>)[] = [];
+	private _onChange?: ChangeHook;
+
+	constructor(pool: Pool, schema: string, options?: { onChange?: ChangeHook }) {
+		super(pool, schema);
+		this._onChange = options?.onChange;
+	}
 
 	/** Insert a document, returning its generated ID */
 	async insert(table: string, data: Record<string, unknown>): Promise<string> {
@@ -301,6 +313,7 @@ export class DatabaseWriter extends DatabaseReader {
 
 		// Emit change event for real-time invalidation
 		this._emitChange(table, "INSERT", id);
+		this._dispatch(table, "INSERT", doc);
 		return id;
 	}
 
@@ -316,6 +329,7 @@ export class DatabaseWriter extends DatabaseReader {
 			values as any[],
 		);
 		this._emitChange(table, "UPDATE", id);
+		this._dispatch(table, "UPDATE", { _id: id, ...fields });
 	}
 
 	/** Full replace — replaces all user fields (preserves system fields) */
@@ -328,6 +342,7 @@ export class DatabaseWriter extends DatabaseReader {
 		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		await this._pool.query(`DELETE FROM "${this._schema}"."${table}" WHERE _id = $1`, [id]);
 		this._emitChange(table, "DELETE", id);
+		this._dispatch(table, "DELETE", { _id: id });
 	}
 
 	/** Execute raw SQL. Supports SELECT, INSERT, UPDATE, DELETE.
@@ -345,7 +360,15 @@ export class DatabaseWriter extends DatabaseReader {
 			trimmed.startsWith("UPDATE") ||
 			trimmed.startsWith("DELETE")
 		) {
-			this._emitChange("unknown", "INSERT", ""); // Invalidate all subscriptions
+			const type: "INSERT" | "UPDATE" | "DELETE" = trimmed.startsWith("INSERT")
+				? "INSERT"
+				: trimmed.startsWith("UPDATE")
+					? "UPDATE"
+					: "DELETE";
+			this._emitChange("unknown", type, ""); // Invalidate all subscriptions
+			// Suppress table-scoped webhook dispatch: raw SQL writes cannot reliably
+			// derive the affected table/payload, and "unknown"/{} would never match
+			// configured webhooks. The cache-invalidation above is preserved.
 		}
 
 		return { rows, rowCount: rowCount ?? 0 };
@@ -355,6 +378,23 @@ export class DatabaseWriter extends DatabaseReader {
 		// Emit to the global realtime manager (IAC-21)
 		const mgr = (globalThis as any).__betterbaseRealtimeManager;
 		mgr?.emitTableChange?.({ table, type, id });
+	}
+
+	/**
+	 * Fire-and-forget fan-out hook for side effects (e.g. webhook dispatch).
+	 * Errors are caught and logged so they never break the DB write response.
+	 */
+	private _dispatch(
+		table: string,
+		type: "INSERT" | "UPDATE" | "DELETE",
+		data: Record<string, unknown>,
+	) {
+		if (!this._onChange) return;
+		Promise.resolve()
+			.then(() => this._onChange!(table, type, data))
+			.catch((err) => {
+				console.error(`[betterbase] onChange hook failed for ${type} on ${table}:`, err);
+			});
 	}
 }
 

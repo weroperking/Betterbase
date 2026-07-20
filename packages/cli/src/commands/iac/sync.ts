@@ -1,4 +1,4 @@
-import { join } from "path";
+import { dirname, join } from "path";
 import { loadSerializedSchema, saveSerializedSchema, serializeSchema } from "@betterbase/core/iac";
 import { diffSchemas, formatDiff } from "@betterbase/core/iac";
 import { generateMigration } from "@betterbase/core/iac";
@@ -12,12 +12,12 @@ import { syncWithServer } from "./server-sync";
 
 export async function runIacSync(
 	projectRoot: string,
-	opts: { 
-		force?: boolean; 
+	opts: {
+		force?: boolean;
 		silent?: boolean;
-		headless?: boolean;          // NEW: Skip interactive prompts
-		autoRegister?: boolean;      // NEW: Auto-register with server
-		environment?: string;        // NEW: Target environment
+		headless?: boolean; // NEW: Skip interactive prompts
+		autoRegister?: boolean; // NEW: Auto-register with server
+		environment?: string; // NEW: Target environment
 	} = {},
 ) {
 	const startTime = Date.now();
@@ -43,9 +43,14 @@ export async function runIacSync(
 	}
 
 	const current = serializeSchema(schema);
-	const previous = loadSerializedSchema(prevFile);
+	const previous = await loadSerializedSchema(prevFile);
 
 	const diff = diffSchemas(previous, current);
+
+	// NOTE: the serialized schema snapshot (schema.json) is intentionally NOT
+	// persisted here. It is written only after the migration is successfully
+	// generated below, so a blocked destructive change (throws before the
+	// write) leaves the previous snapshot intact instead of overwriting it.
 
 	if (diff.isEmpty && !opts.headless && !opts.autoRegister) {
 		if (!opts.silent) success("Schema is up to date. No changes detected.");
@@ -98,6 +103,12 @@ export async function runIacSync(
 	await writeFile(join(migrDir, migration.filename), migration.sql);
 	if (!opts.silent) info(`Migration written: ${migration.filename}`);
 
+	// Persist the serialized schema snapshot only after the migration has been
+	// written successfully. Blocked (destructive) runs throw before reaching
+	// this point, so the previous schema.json remains the source of truth.
+	await mkdir(genDir, { recursive: true });
+	await saveSerializedSchema(current, prevFile);
+
 	// 4. HEADLESS SYNC: Auto-sync with server
 	if (opts.headless || opts.autoRegister) {
 		if (!opts.silent) {
@@ -112,7 +123,7 @@ export async function runIacSync(
 		await syncWithServer(projectRoot, {
 			schema: current,
 			envConfig,
-			environment: opts.environment ?? 'local',
+			environment: opts.environment ?? "local",
 			force: opts.force,
 		});
 
@@ -120,6 +131,7 @@ export async function runIacSync(
 	}
 
 	// 5. Apply migration locally (existing logic)
+	await mkdir(dirname(drizzleOut), { recursive: true });
 	if (opts.silent) {
 		const drizzleCode = generateDrizzleSchema(current, "postgres");
 		await writeFile(drizzleOut, drizzleCode);
@@ -133,9 +145,6 @@ export async function runIacSync(
 			{ successText: "Schema generated" },
 		);
 	}
-
-	await mkdir(genDir, { recursive: true });
-	await saveSerializedSchema(current, prevFile);
 
 	if (!opts.silent) {
 		info("Run the migration runner to apply changes to the database.");

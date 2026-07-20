@@ -106,10 +106,10 @@ export function serializeSchema(schema: SchemaDefinition): SerializedSchema {
 }
 
 /** Load a serialized schema from disk (betterbase/_generated/schema.json) */
-export function loadSerializedSchema(path: string): SerializedSchema | null {
+export async function loadSerializedSchema(path: string): Promise<SerializedSchema | null> {
 	try {
-		const content = Bun.file(path).text();
-		return JSON.parse(content as any) as SerializedSchema;
+		const content = await Bun.file(path).text();
+		return JSON.parse(content) as SerializedSchema;
 	} catch {
 		return null;
 	}

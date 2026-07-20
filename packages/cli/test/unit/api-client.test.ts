@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { apiRequest, requireAuth } from "../../src/utils/api-client";
 import { clearCredentials, saveCredentials, type Credentials } from "../../src/utils/credentials";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
