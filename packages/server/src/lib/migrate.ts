@@ -2,8 +2,9 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
 
+const here = import.meta.dir;
 const MIGRATIONS_DIR = (() => {
-	const candidates = [join(__dirname, "../../migrations"), join(__dirname, "../migrations")];
+	const candidates = [join(here, "../../migrations"), join(here, "../migrations")];
 	for (const dir of candidates) {
 		if (require("node:fs").existsSync(dir)) return dir;
 	}

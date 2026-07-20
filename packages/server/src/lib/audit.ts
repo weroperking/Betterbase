@@ -31,7 +31,9 @@ export type AuditAction =
 	| "role.revoke"
 	| "settings.update"
 	| "smtp.update"
-	| "audit.export";
+	| "audit.export"
+	| "iac.schema.sync"
+	| "iac.env.sync";
 
 export interface AuditEntry {
 	actorId?: string;

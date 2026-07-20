@@ -16,6 +16,7 @@ import {
 	getMigrationsTableSql,
 	loadMigrationFiles,
 } from "./migrate-utils";
+import { getDatabaseType } from "./migrate-utils";
 
 const migrateOptionsSchema = z.object({
 	preview: z.boolean().optional(),
@@ -90,9 +91,10 @@ export async function runMigrateCommand(rawOptions: MigrateCommandOptions): Prom
 	}
 
 	logger.info("drizzle/ files are for preview; running push will apply changes.");
+	const pushArgs = getDatabaseType() === "sqlite" ? ["push", ...getSqlitePushArgs(projectRoot)] : ["push"];
 	const push = await withSpinner(
 		"Applying migration changes...",
-		async () => await runDrizzleKit(["push", ...getSqlitePushArgs(projectRoot)], projectRoot),
+		async () => await runDrizzleKit(pushArgs, projectRoot),
 		{ successText: "Applied migration changes" },
 	);
 
@@ -190,7 +192,7 @@ async function listSqlFiles(
 
 	const walk = async (dir: string): Promise<void> => {
 		try {
-			await access(dir);
+			accessSync(dir);
 		} catch {
 			return;
 		}
@@ -384,7 +386,7 @@ async function backupDatabase(
 	const sourcePath = process.env.DB_PATH ?? DEFAULT_DB_PATH;
 
 	try {
-		await access(sourcePath);
+		accessSync(sourcePath);
 	} catch {
 		logger.warn(`No local database found at ${sourcePath}; skipping backup.`);
 		return null;
@@ -645,7 +647,7 @@ export async function runMigrateRollbackCommand(
 	const migrationsDir = path.join(projectRoot, "migrations");
 
 	try {
-		await access(migrationsDir);
+		accessSync(migrationsDir);
 	} catch {
 		logger.warn(`Migrations directory not found at ${migrationsDir}`);
 		logger.info("Create a 'migrations' folder with your migration files");

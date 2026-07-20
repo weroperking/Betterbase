@@ -166,10 +166,17 @@ templates/iac/
   "dependencies": {
     "@betterbase/core":   "workspace:*",
     "@betterbase/client": "workspace:*",
+    "@betterbase/server": "workspace:*",
     "hono": "^4.0.0"
   }
 }
 ```
+
+> Note: `@betterbase/server` must also expose the `@betterbase/server/routes/betterbase`
+> subpath export (via its `package.json` `exports` map) so the generated
+> `src/index.ts` above can import `betterbaseRouter`. Without that export,
+> `bun install` resolves the generated import cleanly only if the subpath is
+> declared.
 
 **Create file:** `templates/iac/src/index.ts`
 
@@ -186,6 +193,19 @@ app.use("*", cors());
 // Discover and register betterbase/ functions on startup
 const fns = await discoverFunctions(join(process.cwd(), "betterbase"));
 setFunctionRegistry(fns);
+
+// Authentication: require a valid bearer token (admin API key or JWT) before
+// any betterbase route or generated function runs. In local development you may
+// instead configure a safe dev-auth mode that trusts a known dev token, but
+// protected behavior must be preserved outside development.
+app.use("/betterbase/*", async (c, next) => {
+  const auth = c.req.header("Authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  // verifyAdminToken / api-key lookup happens inside betterbaseRouter's middleware
+  await next();
+});
 
 // Mount the betterbase router — this is your entire API surface
 app.route("/betterbase", betterbaseRouter);
@@ -297,7 +317,9 @@ if (opts.iac) {
 - `bb init my-app --iac` scaffolds the IaC template
 - `betterbase/schema.ts`, `betterbase/queries/todos.ts`, `betterbase/mutations/todos.ts` created
 - `bb iac sync` runs automatically after scaffolding
-- `src/index.ts` is 15 lines — no route boilerplate
+- `curl -fsS http://localhost:3000/health` returns `{"status":"ok"}`
+- `curl -fsS http://localhost:3000/betterbase/...` mounts the betterbase router (no 404)
+- the scaffolded `src/index.ts`, `betterbase/schema.ts`, and `betterbase/queries/`, `betterbase/mutations/` directories exist on disk (verifiable via `test -f` / `test -d`)
 - `src/modules/` exists with README
 
 ---
@@ -914,6 +936,16 @@ export function getBunServeConfig() {
       const url = new URL(req.url);
       if (url.pathname === "/betterbase/ws") {
         const projectSlug = url.searchParams.get("project") ?? "default";
+        const ticket = url.searchParams.get("ticket");
+
+        // Validate the WebSocket ticket and its project binding before
+        // upgrading. Tickets are issued by a REST endpoint after auth and are
+        // scoped to a single project; an invalid/mismatched ticket must be
+        // rejected so connections cannot cross project boundaries.
+        if (!ticket || !verifyWSTicket(ticket, projectSlug)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+
         const upgraded = server.upgrade(req, { data: { projectSlug } });
         if (upgraded) return undefined;
         return new Response("WebSocket upgrade failed", { status: 400 });
@@ -1186,7 +1218,7 @@ Replace the stub with real stats:
 ```typescript
 import { Hono } from "hono";
 import { subscriptionTracker } from "@betterbase/core/iac/realtime/subscription-tracker";
-import { getWSStats } from "../../betterbase/ws";
+import { getWSStats } from "../../../routes/betterbase/ws";
 
 export const projectRealtimeRoutes = new Hono();
 
@@ -1460,11 +1492,23 @@ STORAGE_PUBLIC_BASE: z.string().url().optional(),
 ```typescript
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { S3Client } from "@aws-sdk/client-s3";
+import { requireAuth } from "../../lib/auth"; // authenticates the request
+import { isSafeSlug } from "../../lib/slug"; // ^[a-z0-9][a-z0-9_-]{0,62}$
 
 // POST /betterbase/storage/generate-upload-url
-betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
+betterbaseRouter.post("/storage/generate-upload-url", requireAuth, async (c) => {
   const { contentType, filename } = await c.req.json();
-  const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+
+  // Derive the authorized project from the authenticated context rather than
+  // trusting the raw X-Project-Slug header. This prevents cross-project
+  // targeting and identifier injection.
+  const project = c.get("project") as { slug: string } | undefined;
+  if (!project) return c.json({ error: "Forbidden" }, 403);
+
+  // Validate the slug before using it in any identifier.
+  if (!isSafeSlug(project.slug)) return c.json({ error: "Invalid project" }, 400);
+  const projectSlug = project.slug;
+
   const storageId   = `st_${nanoid(20)}`;
   const ext         = filename?.split(".").pop() ?? "";
   const s3Key       = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
@@ -1484,13 +1528,14 @@ betterbaseRouter.post("/storage/generate-upload-url", async (c) => {
     Expires:    300,  // 5 minute window
   });
 
-  // Record the pending upload in the DB so getUrl() works after upload
+  // Record the pending upload using the safe, validated schema helper (no raw
+  // string interpolation of untrusted identifiers).
   const pool = getPool();
   await pool.query(
-    `INSERT INTO "project_${projectSlug}"._iac_storage
-       (storage_id, s3_key, bucket, content_type) VALUES ($1, $2, $3, $4)
+    `INSERT INTO betterbase_meta.project_storage (project_slug, storage_id, s3_key, bucket, content_type)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (storage_id) DO NOTHING`,
-    [storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType ?? "application/octet-stream"]
+    [projectSlug, storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType ?? "application/octet-stream"]
   );
 
   return c.json({ storageId, uploadUrl: url, fields });
@@ -1835,7 +1880,10 @@ export function BetterbaseProvider({ config, children }: { config: BBFConfig; ch
   const [wsReady, setWsReady] = React.useState(false);
 
   useEffect(() => {
-    const wsUrl  = config.url.replace(/^http/, "ws") + `/betterbase/ws?project=${config.projectSlug ?? "default"}`;
+    // Acquire a short-lived WebSocket ticket scoped to this project, then pass
+    // it on the connection so the server can validate the project binding.
+    const ticket = getWSTicket?.(config.projectSlug ?? "default");
+    const wsUrl  = config.url.replace(/^http/, "ws") + `/betterbase/ws?project=${config.projectSlug ?? "default"}&ticket=${ticket ?? ""}`;
     const ws     = new WebSocket(wsUrl);
 
     ws.onopen  = () => { setWsReady(true); };
@@ -1905,7 +1953,8 @@ async function callBBF<T>(
   baseUrl:     string,
   path:        string,
   args:        unknown,
-  getToken?:   () => string | null
+  getToken?:   () => string | null,
+  projectSlug?: string,
 ): Promise<T> {
   const token = getToken?.();
   const res   = await fetch(`${baseUrl}/betterbase/${path}`, {
@@ -1913,6 +1962,7 @@ async function callBBF<T>(
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(projectSlug ? { "X-Project-Slug": projectSlug } : {}),
     },
     body: JSON.stringify({ args }),
   });
@@ -1959,7 +2009,7 @@ export function useQuery<TReturn>(
 
     setStatus("loading");
     try {
-      const result = await callBBF<TReturn>(config.url, path, JSON.parse(argsJson), config.getToken);
+      const result = await callBBF<TReturn>(config.url, path, JSON.parse(argsJson), config.getToken, config.projectSlug);
       if (ctrl.signal.aborted) return;
       setData(result);
       setStatus("success");
@@ -2034,7 +2084,7 @@ export function useMutation<TReturn = void>(
     setIsPending(true);
     setError(null);
     try {
-      const result = await callBBF<TReturn>(config.url, path, args, config.getToken);
+      const result = await callBBF<TReturn>(config.url, path, args, config.getToken, config.projectSlug);
       return result;
     } catch (e: any) {
       setError(e);
@@ -2178,11 +2228,26 @@ export const listTodosPaginated = query({
   },
   handler: async (ctx, args) => {
     const limit  = args.numItems ?? 10;
-    const all    = await ctx.db.query("todos").order("desc").take(limit + 1).collect();
+
+    // Deterministic ordering so pagination is stable across pages.
+    const q = ctx.db.query("todos").order("desc", "_createdAt").order("desc", "_id");
+
+    // Advance past the cursor: the cursor is the composite of the last item's
+    // (_createdAt, _id). Compare lexically so successive loadMore() calls return
+    // the next page instead of repeating the first one.
+    let builder = q;
+    if (args.cursor) {
+      const [cursorCreated, cursorId] = args.cursor.split("|");
+      builder = builder.filter("_createdAt", "lt", cursorCreated);
+      builder = builder.filter("_id", "lt", cursorId);
+    }
+
+    const all    = await builder.take(limit + 1).collect();
     const isDone = all.length <= limit;
     const page   = all.slice(0, limit);
-    // cursor = _id of last item (client passes this back on next page)
-    const cursor = isDone ? null : page[page.length - 1]._id;
+    // cursor = composite of last item (_createdAt + "|" + _id), passed back by the client
+    const cursor = isDone ? null
+      : `${page[page.length - 1]._createdAt}|${page[page.length - 1]._id}`;
     return { page, isDone, cursor };
   },
 });
@@ -2244,7 +2309,8 @@ export function createBBFClient(opts: {
 
   function getWS(): WebSocket {
     if (ws?.readyState === WebSocket.OPEN) return ws;
-    const wsUrl = url.replace(/^http/, "ws") + `/betterbase/ws?project=${projectSlug}`;
+    const ticket = getWSTicket?.(projectSlug);
+    const wsUrl = url.replace(/^http/, "ws") + `/betterbase/ws?project=${projectSlug}&ticket=${ticket ?? ""}`;
     ws = new WebSocket(wsUrl);
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
@@ -2265,6 +2331,7 @@ export function createBBFClient(opts: {
       headers: {
         "Content-Type":  "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(projectSlug ? { "X-Project-Slug": projectSlug } : {}),
       },
       body: JSON.stringify({ args }),
     });

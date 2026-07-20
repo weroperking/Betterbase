@@ -335,7 +335,13 @@ export class DatabaseWriter extends DatabaseReader {
 			trimmed.startsWith("UPDATE") ||
 			trimmed.startsWith("DELETE")
 		) {
-			this._emitChange("unknown", "INSERT", ""); // Invalidate all subscriptions
+			const type: "INSERT" | "UPDATE" | "DELETE" = trimmed.startsWith("INSERT")
+				? "INSERT"
+				: trimmed.startsWith("UPDATE")
+					? "UPDATE"
+					: "DELETE";
+			this._emitChange("unknown", type, ""); // Invalidate all subscriptions
+			this._dispatch("unknown", type, {}); // Fire side-effect hooks (webhooks)
 		}
 
 		return { rows, rowCount: rowCount ?? 0 };

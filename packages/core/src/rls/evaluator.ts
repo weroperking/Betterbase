@@ -66,11 +66,18 @@ export function evaluatePolicy(
 	const roleMatch = policyExpression.match(/auth\.role\(\)\s*=\s*'([^']+)'/);
 	if (roleMatch) {
 		const requiredRole = roleMatch[1];
-		// The role is supplied via the optional `role` argument below when present.
-		// Otherwise fall back to a sensible default: an authenticated session is
-		// considered to have the "authenticated" role.
-		const role = (record as { __role?: string } | undefined)?.__role ?? "authenticated";
-		return role === requiredRole;
+		// An explicit record.__role (if present and meaningful) takes precedence,
+		// otherwise the effective role is derived from the authenticated user:
+		// an identified user is "authenticated", an anonymous user (no userId)
+		// is "anonymous". This prevents anonymous callers from satisfying an
+		// "authenticated" role check.
+		const explicit = (record as { __role?: string } | undefined)?.__role;
+		const effective = explicit && explicit !== "anonymous"
+			? explicit
+			: userId !== null
+				? "authenticated"
+				: "anonymous";
+		return effective === requiredRole;
 	}
 
 	// Unknown policy format - deny by default for security

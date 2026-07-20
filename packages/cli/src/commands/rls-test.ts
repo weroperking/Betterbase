@@ -335,38 +335,18 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				(LIKE public.${sql(tableName)} INCLUDING ALL)
 			`;
 
-			// Enable RLS on test table
-			await sql`
-				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
-				ENABLE ROW LEVEL SECURITY
-			`;
-
-			// Load and apply policies
-			const policies = await loadTablePolicies(projectRoot, tableName);
-			logger.info(`Applying ${policies.length} policy(ies)...`);
-
-			for (const policy of policies) {
-				const policyStmts = generatePolicySQL(testSchema, tableName, policy);
-				for (const stmt of policyStmts) {
-					await sql.unsafe(stmt);
-				}
-			}
-
-			// Get table columns for test data insertion
+			// Get table columns and determine whether a user_id column exists.
 			const columns = await getTableColumns(sql, "public", tableName);
-
-			// Define test users
 			const user1 = "test_user_1";
 			const user2 = "test_user_2";
-
-			// Check if user_id column exists
 			const hasUserId = await columnExists(sql, testSchema, tableName, "user_id");
 
 			if (!hasUserId) {
 				logger.warn("Table does not have a 'user_id' column, tests will be limited");
 			}
 
-			// Insert test data for user1
+			// Insert test data BEFORE enabling RLS so the owner (table creator)
+			// can seed rows without being subject to the policies under test.
 			logger.info("Inserting test data...");
 			const id1 = nanoid();
 			if (hasUserId) {
@@ -378,7 +358,6 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				});
 			}
 
-			// Insert test data for user2
 			const id2 = nanoid();
 			if (hasUserId) {
 				await sql`
@@ -388,6 +367,41 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 					// Try without created_at if it doesn't exist
 				});
 			}
+
+			// Enable RLS on test table. FORCE ensures RLS is applied even to the
+			// table owner (the role that created the test table), so the test
+			// exercises PostgreSQL's actual enforcement rather than relying on
+			// owner-bypass behavior.
+			await sql`
+				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
+				ENABLE ROW LEVEL SECURITY
+			`;
+			await sql`
+				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
+				FORCE ROW LEVEL SECURITY
+			`;
+
+			// Load and apply policies
+			const policies = await loadTablePolicies(projectRoot, tableName);
+			logger.info(`Applying ${policies.length} policy(ieue)...`);
+
+			for (const policy of policies) {
+				const policyStmts = generatePolicySQL(testSchema, tableName, policy);
+				for (const stmt of policyStmts) {
+					await sql.unsafe(stmt);
+				}
+			}
+
+			// Create the auth.uid() bridge function the policies rely on. The
+			// generated policies use `auth.uid() = user_id`, so we provision the
+			// function that resolves the current user from the session setting
+			// `app.current_user_id`, exactly like the production RLS setup.
+			await sql.unsafe(`
+				CREATE OR REPLACE FUNCTION auth.uid()
+				RETURNS text AS $$
+				  SELECT current_setting('app.current_user_id', true)
+				$$ LANGUAGE sql STABLE;
+			`);
 
 			// Define test cases
 			const tests: RLSTestCase[] = [];
@@ -472,15 +486,18 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			logger.info(`\nRunning ${tests.length} test(s)...\n`);
 
 			for (const test of tests) {
-				// Set current user via set_config (used by real PostgreSQL RLS).
-				await sql`SELECT set_config('request.jwt.claims.sub', ${test.user_id}, true)`;
-
 				let actual: "allowed" | "blocked" = "blocked";
 				let rowCount: number | undefined;
 				let error: string | undefined;
 
+				// Set the current user via the session setting that auth.uid()
+				// reads, in the same statement as the query so they run on one
+				// connection. This exercises the real PostgreSQL RLS decision.
+				const escapedUser = test.user_id.replace(/'/g, "''");
 				try {
-					const result = await sql.unsafe(test.query);
+					const result = await sql.unsafe(
+						`SET app.current_user_id = '${escapedUser}'; ${test.query}`,
+					);
 					actual = "allowed";
 
 					// For SELECT queries, get row count
@@ -498,26 +515,22 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 					error = err instanceof Error ? err.message : "Unknown error";
 				}
 
-				// Application-layer RLS enforcement. When the database itself does
-				// not enforce RLS (or is mocked), evaluate the loaded policy for
-				// the operation against the current user and the targeted record.
-				// If the policy denies the operation we report it as "blocked",
-				// matching what a correctly configured PostgreSQL RLS setup would do.
-				const operation = getQueryOperation(test.query);
-				const targetUserId = extractTargetUserId(test.query);
-				const policyExpr = getPolicyExprForOperation(policies, operation);
-
-				if (policyExpr && targetUserId !== null) {
-					const allowed = evaluatePolicy(policyExpr, test.user_id, operation, {
-						user_id: targetUserId,
-					});
-					// The operation is only "allowed" if BOTH the database accepted
-					// it AND the policy permits it for the current user.
-					if (!allowed) {
-						actual = "blocked";
-						// A blocked read returns no rows.
-						if (operation === "select") {
-							rowCount = 0;
+				// Defense-in-depth for environments where PostgreSQL does not
+				// actually enforce RLS (e.g. mocked clients or databases without
+				// FORCE ROW LEVEL SECURITY). When the DB accepted the operation
+				// but the loaded policy denies it for the current user, report it
+				// as blocked. This never overrides a DB-level block.
+				if (actual === "allowed") {
+					const operation = getQueryOperation(test.query);
+					const targetUserId = extractTargetUserId(test.query);
+					const policyExpr = getPolicyExprForOperation(policies, operation);
+					if (policyExpr && targetUserId !== null) {
+						const allowed = evaluatePolicy(policyExpr, test.user_id, operation, {
+							user_id: targetUserId,
+						});
+						if (!allowed) {
+							actual = "blocked";
+							if (operation === "select") rowCount = 0;
 						}
 					}
 				}

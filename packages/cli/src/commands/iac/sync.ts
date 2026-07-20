@@ -47,12 +47,10 @@ export async function runIacSync(
 
 	const diff = diffSchemas(previous, current);
 
-	// Always persist the serialized schema snapshot as the source of truth,
-	// even when there are no pending changes (e.g. a first sync with no
-	// previous schema.json). This keeps betterbase/_generated/schema.json in
-	// sync with the current schema.
-	await mkdir(genDir, { recursive: true });
-	await saveSerializedSchema(current, prevFile);
+	// NOTE: the serialized schema snapshot (schema.json) is intentionally NOT
+	// persisted here. It is written only after the migration is successfully
+	// generated below, so a blocked destructive change (throws before the
+	// write) leaves the previous snapshot intact instead of overwriting it.
 
 	if (diff.isEmpty && !opts.headless && !opts.autoRegister) {
 		if (!opts.silent) success("Schema is up to date. No changes detected.");
@@ -104,6 +102,12 @@ export async function runIacSync(
 	await mkdir(migrDir, { recursive: true });
 	await writeFile(join(migrDir, migration.filename), migration.sql);
 	if (!opts.silent) info(`Migration written: ${migration.filename}`);
+
+	// Persist the serialized schema snapshot only after the migration has been
+	// written successfully. Blocked (destructive) runs throw before reaching
+	// this point, so the previous schema.json remains the source of truth.
+	await mkdir(genDir, { recursive: true });
+	await saveSerializedSchema(current, prevFile);
 
 	// 4. HEADLESS SYNC: Auto-sync with server
 	if (opts.headless || opts.autoRegister) {

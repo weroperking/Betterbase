@@ -28,7 +28,7 @@ export type ColumnBuilder<T extends z.ZodTypeAny> = T & {
 	notNull(): ColumnBuilder<T>;
 	unique(): ColumnBuilder<T>;
 	defaultNow(): ColumnBuilder<T>;
-	optional(): ColumnBuilder<T>;
+	optional(): ColumnBuilder<z.ZodOptional<T>>;
 };
 
 function make<T extends z.ZodTypeAny>(base: T, name: string): ColumnBuilder<T> {
@@ -52,7 +52,7 @@ function make<T extends z.ZodTypeAny>(base: T, name: string): ColumnBuilder<T> {
 		return builder;
 	};
 	builder.optional = () => {
-		const opt = base.optional() as unknown as ColumnBuilder<T>;
+		const opt = make(base.optional(), builder._col.name);
 		opt._col = { ...builder._col };
 		return opt;
 	};
