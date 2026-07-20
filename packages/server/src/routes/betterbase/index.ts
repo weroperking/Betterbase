@@ -12,9 +12,19 @@ import { z } from "zod";
 import { extractBearerToken, verifyAdminToken } from "../../lib/auth";
 import { getPool } from "../../lib/db";
 import { validateEnv } from "../../lib/env";
+import { dispatchWebhookEvents } from "../../lib/webhook-dispatcher";
+
+// onChange hook that fans DB writes out to configured webhooks (fire-and-forget).
+function buildWebhookOnChange() {
+	return (table: string, type: "INSERT" | "UPDATE" | "DELETE", data: Record<string, unknown>) => {
+		dispatchWebhookEvents(table, type, data).catch((err) => {
+			console.error(`[betterbase] webhook dispatch failed for ${type} on ${table}:`, err);
+		});
+	};
+}
 
 // Import WS handler for stats
-import { createWSTicket, getWSStats, WS_TICKET_TTL_MS } from "./ws";
+import { WS_TICKET_TTL_MS, createWSTicket, getWSStats } from "./ws";
 
 // Import S3 utilities
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -80,7 +90,7 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 		} else if (fn.kind === "mutation") {
 			const storage = buildStorageCtx(pool, projectSlug);
 			const scheduler = buildSchedulerCtx(pool, projectSlug);
-			const writer = new DatabaseWriter(pool, dbSchema);
+			const writer = new DatabaseWriter(pool, dbSchema, { onChange: buildWebhookOnChange() });
 			const ctx = { db: writer, auth: authCtx, storage, scheduler };
 			result = await (fn.handler as any)._handler(ctx, parsed.data);
 		} else {
@@ -185,7 +195,7 @@ function buildActionCtx(pool: any, dbSchema: string, auth: any, projectSlug: str
 		},
 		runMutation: async (fn: any, args: any) => {
 			const ctx = {
-				db: new DatabaseWriter(pool, dbSchema),
+				db: new DatabaseWriter(pool, dbSchema, { onChange: buildWebhookOnChange() }),
 				auth,
 				storage: buildStorageCtx(pool, projectSlug),
 				scheduler: buildSchedulerCtx(pool, projectSlug),
@@ -201,80 +211,82 @@ const uploadUrlSchema = z.object({
 	filename: z.string().min(1).max(255).optional(),
 });
 
-betterbaseRouter.post("/storage/generate-upload-url", zValidator("json", uploadUrlSchema), async (c) => {
-	const token = extractBearerToken(c.req.header("Authorization"));
-	const adminPayload = token ? await verifyAdminToken(token) : null;
-	if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
+betterbaseRouter.post(
+	"/storage/generate-upload-url",
+	zValidator("json", uploadUrlSchema),
+	async (c) => {
+		const token = extractBearerToken(c.req.header("Authorization"));
+		const adminPayload = token ? await verifyAdminToken(token) : null;
+		if (!adminPayload) return c.json({ error: "Unauthorized" }, 401);
 
-	const { contentType, filename } = c.req.valid("json");
-	const safeContentType = ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType) ? contentType : null;
-	if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
+		const { contentType, filename } = c.req.valid("json");
+		const safeContentType = ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType) ? contentType : null;
+		if (!safeContentType) return c.json({ error: "Unsupported content type" }, 400);
 
-	const projectSlug = c.req.header("X-Project-Slug") ?? "default";
-	if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
-		return c.json({ error: "Invalid project slug" }, 400);
-	}
-
-	let ext = "";
-	if (typeof filename === "string") {
-		// Original filename is not used in S3 keys; only a sanitized trailing extension is used.
-		const trimmed = filename.trim();
-		if (trimmed.includes("/") || trimmed.includes("?")) {
-			return c.json({ error: "Invalid filename" }, 400);
+		const projectSlug = c.req.header("X-Project-Slug") ?? "default";
+		if (!SAFE_PROJECT_SLUG.test(projectSlug)) {
+			return c.json({ error: "Invalid project slug" }, 400);
 		}
-		const parsedExt = trimmed.includes(".") ? trimmed.split(".").pop() ?? "" : "";
-		if (parsedExt && !/^[a-zA-Z0-9]{1,16}$/.test(parsedExt)) {
-			return c.json({ error: "Invalid filename extension" }, 400);
-		}
-		ext = parsedExt.toLowerCase();
-	}
 
-	const storageId = `st_${nanoid(20)}`;
-	const s3Key = `project_${projectSlug}/${storageId}${ext ? "." + ext : ""}`;
-	const env = validateEnv();
-	if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
-		return c.json(
-			{ error: "Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY." },
-			500,
+		let ext = "";
+		if (typeof filename === "string") {
+			// Original filename is not used in S3 keys; only a sanitized trailing extension is used.
+			const trimmed = filename.trim();
+			if (trimmed.includes("/") || trimmed.includes("?")) {
+				return c.json({ error: "Invalid filename" }, 400);
+			}
+			const parsedExt = trimmed.includes(".") ? (trimmed.split(".").pop() ?? "") : "";
+			if (parsedExt && !/^[a-zA-Z0-9]{1,16}$/.test(parsedExt)) {
+				return c.json({ error: "Invalid filename extension" }, 400);
+			}
+			ext = parsedExt.toLowerCase();
+		}
+
+		const storageId = `st_${nanoid(20)}`;
+		const s3Key = `project_${projectSlug}/${storageId}${ext ? `.${ext}` : ""}`;
+		const env = validateEnv();
+		if (!env.STORAGE_ENDPOINT || !env.STORAGE_ACCESS_KEY || !env.STORAGE_SECRET_KEY) {
+			return c.json(
+				{
+					error:
+						"Storage is not configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY.",
+				},
+				500,
+			);
+		}
+
+		const s3 = new S3Client({
+			endpoint: env.STORAGE_ENDPOINT,
+			region: "us-east-1",
+			credentials: {
+				accessKeyId: env.STORAGE_ACCESS_KEY,
+				secretAccessKey: env.STORAGE_SECRET_KEY,
+			},
+			forcePathStyle: true,
+		});
+
+		const uploadUrl = await getSignedUrl(
+			s3,
+			new PutObjectCommand({
+				Bucket: env.STORAGE_BUCKET,
+				Key: s3Key,
+				ContentType: safeContentType,
+			}),
+			{ expiresIn: 300 },
 		);
-	}
 
-	const s3 = new S3Client({
-		endpoint: env.STORAGE_ENDPOINT,
-		region: "us-east-1",
-		credentials: {
-			accessKeyId: env.STORAGE_ACCESS_KEY,
-			secretAccessKey: env.STORAGE_SECRET_KEY,
-		},
-		forcePathStyle: true,
-	});
-
-	const uploadUrl = await getSignedUrl(
-		s3,
-		new PutObjectCommand({
-			Bucket: env.STORAGE_BUCKET,
-			Key: s3Key,
-			ContentType: safeContentType,
-		}),
-		{ expiresIn: 300 },
-	);
-
-	// Record the pending upload in the DB so getUrl() works after upload
-	const pool = getPool();
-	await pool.query(
-		`INSERT INTO "project_${projectSlug}"._iac_storage
+		// Record the pending upload in the DB so getUrl() works after upload
+		const pool = getPool();
+		await pool.query(
+			`INSERT INTO "project_${projectSlug}"._iac_storage
        (storage_id, s3_key, bucket, content_type) VALUES ($1, $2, $3, $4)
      ON CONFLICT (storage_id) DO NOTHING`,
-		[
-			storageId,
-			s3Key,
-			env.STORAGE_BUCKET,
-			safeContentType,
-		],
-	);
+			[storageId, s3Key, env.STORAGE_BUCKET, safeContentType],
+		);
 
-	return c.json({ storageId, uploadUrl });
-});
+		return c.json({ storageId, uploadUrl });
+	},
+);
 
 betterbaseRouter.post(
 	"/ws-ticket",

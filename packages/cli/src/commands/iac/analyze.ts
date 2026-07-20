@@ -18,7 +18,24 @@ export async function runIacAnalyze(
 
 	if (!existsSync(betterbaseDir) || !statSync(betterbaseDir).isDirectory()) {
 		logger.error("No betterbase/ directory found. Run this from a BetterBase project.");
-		return;
+		throw new Error("No betterbase/ directory found. Run this from a BetterBase project.");
+	}
+
+	const queriesDir = join(betterbaseDir, "queries");
+	const queriesMissing = !existsSync(queriesDir) || !statSync(queriesDir).isDirectory();
+
+	// A project that declares other function kinds (mutations/actions) but is
+	// missing its queries directory is misconfigured — fail loudly. A bare
+	// project (only schema.ts) with no queries simply has nothing to analyze.
+	const hasOtherFunctions =
+		(existsSync(join(betterbaseDir, "mutations")) &&
+			statSync(join(betterbaseDir, "mutations")).isDirectory()) ||
+		(existsSync(join(betterbaseDir, "actions")) &&
+			statSync(join(betterbaseDir, "actions")).isDirectory());
+
+	if (queriesMissing && hasOtherFunctions) {
+		logger.error("No betterbase/queries directory found. Add query functions to analyze.");
+		throw new Error("No betterbase/queries directory found. Add query functions to analyze.");
 	}
 
 	logger.info("Analyzing queries...");

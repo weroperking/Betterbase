@@ -7,7 +7,7 @@
  * are exercised indirectly through exported command output and spy assertions.
  */
 
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { createTestProject } from "../fixtures/fixtures";
@@ -46,25 +46,32 @@ const createSignedUrlSpy = mock(async (_bucket: string, _key: string, _opts?: an
 
 // ── Module mocks (must precede dynamic import) ───────────────────────────────
 mock.module("@betterbase/core/storage", () => ({
-  createS3Adapter: () => ({
-    listObjects: listObjectsSpy,
-    upload: uploadSpy,
-    getPublicUrl: getPublicUrlSpy,
-    createSignedUrl: createSignedUrlSpy,
-  }),
-  createStorage: () => ({}),
+	createS3Adapter: () => ({
+		listObjects: listObjectsSpy,
+		upload: uploadSpy,
+		getPublicUrl: getPublicUrlSpy,
+		createSignedUrl: createSignedUrlSpy,
+	}),
+	createStorage: () => ({}),
 }));
 
 const configModulePath = path.resolve(__dirname, "../../src/utils/config.ts");
 mock.module(configModulePath, () => ({
-  loadConfig: async () => mockConfigResult,
-  findConfigFile: async () => null,
-  readConfigFile: async () => null,
+	loadConfig: async () => mockConfigResult,
+	findConfigFile: async () => null,
+	readConfigFile: async () => null,
 }));
+
+// ── Mock lifecycle hygiene ───────────────────────────────────────────────────
+// After all tests in this file, clear the process-global mock.module registry so
+// the mocked modules cannot leak into sibling test files in a combined run.
+afterAll(() => {
+	mock.restore();
+});
 
 // ── Dynamic import ───────────────────────────────────────────────────────────
 const { runStorageBucketsListCommand, runStorageUploadCommand } = await import(
-  "../../src/commands/storage"
+	"../../src/commands/storage"
 );
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

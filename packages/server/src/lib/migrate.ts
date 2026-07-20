@@ -1,8 +1,15 @@
-import { join } from "path";
-import { readFile, readdir } from "fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { Pool } from "pg";
 
-const MIGRATIONS_DIR = join(__dirname, "../../migrations");
+const here = import.meta.dir;
+const MIGRATIONS_DIR = (() => {
+	const candidates = [join(here, "../../migrations"), join(here, "../migrations")];
+	for (const dir of candidates) {
+		if (require("node:fs").existsSync(dir)) return dir;
+	}
+	return candidates[0];
+})();
 
 export async function runMigrations(pool: Pool): Promise<void> {
 	// Ensure tracking table exists before we query it

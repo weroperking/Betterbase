@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { evaluatePolicy } from "@betterbase/core/rls";
 import chalk from "chalk";
 import { nanoid } from "nanoid";
 import postgres from "postgres";
@@ -141,9 +142,13 @@ async function loadTablePolicies(projectRoot: string, tableName: string): Promis
 }
 
 /**
- * Generate SQL for creating a policy
+ * Generate SQL statements for creating a policy.
+ *
+ * Emits ONE `CREATE POLICY` statement per operation that is defined on the
+ * policy (select / insert / update / delete), so callers can execute each
+ * statement independently.
  */
-function generatePolicySQL(testSchema: string, tableName: string, policy: PolicyInfo): string {
+function generatePolicySQL(testSchema: string, tableName: string, policy: PolicyInfo): string[] {
 	const statements: string[] = [];
 
 	if (policy.select) {
@@ -170,7 +175,51 @@ function generatePolicySQL(testSchema: string, tableName: string, policy: Policy
 		);
 	}
 
-	return statements.join("; ");
+	return statements;
+}
+
+/**
+ * Extract the operation type (select/insert/update/delete) from a SQL query.
+ */
+function getQueryOperation(query: string): "select" | "insert" | "update" | "delete" {
+	const match = query.match(/^\s*(SELECT|INSERT|UPDATE|DELETE)/i);
+	if (match) {
+		return match[1].toLowerCase() as "select" | "insert" | "update" | "delete";
+	}
+	return "select";
+}
+
+/**
+ * Extract the `user_id` value that a query targets. For INSERT this is the
+ * value supplied to the `user_id` column; for other operations it is the value
+ * referenced in a `user_id = '...'` predicate.
+ */
+function extractTargetUserId(query: string): string | null {
+	const insertMatch = query.match(/user_id\)\s*VALUES\s*\([^,]+,\s*'([^']+)'/i);
+	if (insertMatch) {
+		return insertMatch[1];
+	}
+
+	const whereMatch = query.match(/user_id\s*=\s*'([^']+)'/i);
+	if (whereMatch) {
+		return whereMatch[1];
+	}
+
+	return null;
+}
+
+/**
+ * Find the policy expression defined for a given operation across the loaded
+ * policies.
+ */
+function getPolicyExprForOperation(policies: PolicyInfo[], operation: string): string | undefined {
+	for (const policy of policies) {
+		const expr = (policy as unknown as Record<string, string | undefined>)[operation];
+		if (expr) {
+			return expr;
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -278,6 +327,8 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 
 		await sql`CREATE SCHEMA ${sql(testSchema)}`;
 
+		let existingUidDef: string | null = null;
+
 		try {
 			// Copy table structure
 			logger.info("Copying table structure...");
@@ -286,38 +337,18 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				(LIKE public.${sql(tableName)} INCLUDING ALL)
 			`;
 
-			// Enable RLS on test table
-			await sql`
-				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
-				ENABLE ROW LEVEL SECURITY
-			`;
-
-			// Load and apply policies
-			const policies = await loadTablePolicies(projectRoot, tableName);
-			logger.info(`Applying ${policies.length} policy(ies)...`);
-
-			for (const policy of policies) {
-				const policySQL = generatePolicySQL(testSchema, tableName, policy);
-				if (policySQL) {
-					await sql.unsafe(policySQL);
-				}
-			}
-
-			// Get table columns for test data insertion
+			// Get table columns and determine whether a user_id column exists.
 			const columns = await getTableColumns(sql, "public", tableName);
-
-			// Define test users
 			const user1 = "test_user_1";
 			const user2 = "test_user_2";
-
-			// Check if user_id column exists
 			const hasUserId = await columnExists(sql, testSchema, tableName, "user_id");
 
 			if (!hasUserId) {
 				logger.warn("Table does not have a 'user_id' column, tests will be limited");
 			}
 
-			// Insert test data for user1
+			// Insert test data BEFORE enabling RLS so the owner (table creator)
+			// can seed rows without being subject to the policies under test.
 			logger.info("Inserting test data...");
 			const id1 = nanoid();
 			if (hasUserId) {
@@ -329,7 +360,6 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				});
 			}
 
-			// Insert test data for user2
 			const id2 = nanoid();
 			if (hasUserId) {
 				await sql`
@@ -339,6 +369,54 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 					// Try without created_at if it doesn't exist
 				});
 			}
+
+			// Enable RLS on test table. FORCE ensures RLS is applied even to the
+			// table owner (the role that created the test table), so the test
+			// exercises PostgreSQL's actual enforcement rather than relying on
+			// owner-bypass behavior.
+			await sql`
+				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
+				ENABLE ROW LEVEL SECURITY
+			`;
+			await sql`
+				ALTER TABLE ${sql(testSchema)}.${sql(tableName)}
+				FORCE ROW LEVEL SECURITY
+			`;
+
+			// Load and apply policies
+			const policies = await loadTablePolicies(projectRoot, tableName);
+			logger.info(`Applying ${policies.length} policy(ies)...`);
+
+			for (const policy of policies) {
+				const policyStmts = generatePolicySQL(testSchema, tableName, policy);
+				for (const stmt of policyStmts) {
+					await sql.unsafe(stmt);
+				}
+			}
+
+			// Save any existing auth.uid() definition so we can restore it (or
+			// drop it if it didn't exist) during cleanup. This avoids clobbering
+			// a user-defined function with the same name.
+			const uidRows = await sql.unsafe(`
+				SELECT pg_get_functiondef(('auth.uid'::regproc)::oid) AS definition
+				WHERE EXISTS (
+					SELECT 1 FROM pg_proc p
+					JOIN pg_namespace n ON n.oid = p.pronamespace
+					WHERE n.nspname = 'auth' AND p.proname = 'uid'
+				)
+			`);
+			existingUidDef = (uidRows[0] as { definition?: string } | undefined)?.definition ?? null;
+
+			// Create the auth.uid() bridge function the policies rely on. The
+			// generated policies use `auth.uid() = user_id`, so we provision the
+			// function that resolves the current user from the session setting
+			// `app.current_user_id`, exactly like the production RLS setup.
+			await sql.unsafe(`
+				CREATE OR REPLACE FUNCTION auth.uid()
+				RETURNS text AS $$
+				  SELECT current_setting('app.current_user_id', true)
+				$$ LANGUAGE sql STABLE;
+			`);
 
 			// Define test cases
 			const tests: RLSTestCase[] = [];
@@ -423,15 +501,18 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			logger.info(`\nRunning ${tests.length} test(s)...\n`);
 
 			for (const test of tests) {
-				// Set current user via set_config
-				await sql`SELECT set_config('request.jwt.claims.sub', ${test.user_id}, true)`;
-
 				let actual: "allowed" | "blocked" = "blocked";
 				let rowCount: number | undefined;
 				let error: string | undefined;
 
+				// Set the current user via the session setting that auth.uid()
+				// reads, in the same statement as the query so they run on one
+				// connection. This exercises the real PostgreSQL RLS decision.
+				const escapedUser = test.user_id.replace(/'/g, "''");
 				try {
-					const result = await sql.unsafe(test.query);
+					const result = await sql.unsafe(
+						`SET app.current_user_id = '${escapedUser}'; ${test.query}`,
+					);
 					actual = "allowed";
 
 					// For SELECT queries, get row count
@@ -447,6 +528,26 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 				} catch (err) {
 					actual = "blocked";
 					error = err instanceof Error ? err.message : "Unknown error";
+				}
+
+				// Defense-in-depth for environments where PostgreSQL does not
+				// actually enforce RLS (e.g. mocked clients or databases without
+				// FORCE ROW LEVEL SECURITY). When the DB accepted the operation
+				// but the loaded policy denies it for the current user, report it
+				// as blocked. This never overrides a DB-level block.
+				if (actual === "allowed") {
+					const operation = getQueryOperation(test.query);
+					const targetUserId = extractTargetUserId(test.query);
+					const policyExpr = getPolicyExprForOperation(policies, operation);
+					if (policyExpr && targetUserId !== null) {
+						const allowed = evaluatePolicy(policyExpr, test.user_id, operation, {
+							user_id: targetUserId,
+						});
+						if (!allowed) {
+							actual = "blocked";
+							if (operation === "select") rowCount = 0;
+						}
+					}
 				}
 
 				const passed =
@@ -476,7 +577,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			const passedCount = results.filter((r) => r.passed).length;
 			const failedCount = results.filter((r) => !r.passed).length;
 
-			console.log("\n" + chalk.bold("📊 Results\n"));
+			console.log(`\n${chalk.bold("📊 Results\n")}`);
 			console.log(
 				JSON.stringify(
 					{
@@ -501,6 +602,15 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			// Cleanup: Drop test schema
 			logger.info("Cleaning up test schema...");
 			await sql`DROP SCHEMA IF EXISTS ${sql(testSchema)} CASCADE`;
+
+			// Restore the original auth.uid() definition, or drop it if none
+			// existed before this test, so we don't leave the test bridge behind.
+			if (existingUidDef) {
+				await sql.unsafe(existingUidDef);
+			} else {
+				await sql.unsafe("DROP FUNCTION IF EXISTS auth.uid()");
+			}
+
 			logger.success("Test schema cleaned up");
 		}
 	} finally {

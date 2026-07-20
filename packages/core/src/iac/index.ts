@@ -52,6 +52,7 @@ export {
 	type ActionRegistration,
 } from "./functions";
 export { DatabaseReader, DatabaseWriter, IaCQueryBuilder } from "./db-context";
+export { text, number, boolean, timestamp, id, type ColumnMeta, type ColumnBuilder } from "./columns";
 export {
 	discoverFunctions,
 	setFunctionRegistry,

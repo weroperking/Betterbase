@@ -1,5 +1,5 @@
+import { readdir } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
-import { readdir } from "fs/promises";
 
 export interface RegisteredFunction {
 	kind: "query" | "mutation" | "action";
@@ -44,9 +44,12 @@ export async function discoverFunctions(functionsDir: string): Promise<Registere
 				const fnKind: "query" | "mutation" | "action" =
 					fn[Symbol.for("BetterBaseFunction")] ?? (kind.slice(0, -1) as any);
 
+				const fnPath = `${kind}/${rel}/${exportName}`;
+				fn.__betterbasePath = fnPath;
+
 				registered.push({
 					kind: fnKind,
-					path: `${kind}/${rel}/${exportName}`,
+					path: fnPath,
 					name: exportName,
 					module: file,
 					handler: fn,

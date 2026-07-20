@@ -21,7 +21,7 @@ Blazing-fast backend development with Sub-100ms Local Dev — Built on Bun + SQL
 
 *Database • Authentication • Realtime Subscriptions • Storage • Serverless Functions • Vector Search*
 
-**Last Updated: 2026-03-30**
+**Last Updated: 2026-07-20**
 
 </div>
 
@@ -270,10 +270,16 @@ Both patterns work together. Add `betterbase/` to any existing project.
 |---------|-------------|
 | `bb init [name]` | Create new project |
 | `bb dev` | Start dev server |
-| `bb iac sync` | Sync IaC schema |
-| `bb iac analyze` | Analyze query performance |
+| `bb iac sync` | Sync IaC schema and generate Drizzle migration |
+| `bb iac analyze` | Analyze IaC query performance |
+| `bb iac generate` | Generate client IaC bindings |
 | `bb migrate` | Run migrations |
-| `bb generate types` | Generate TypeScript types |
+| `bb generate crud <table>` | Generate full CRUD routes for a table |
+| `bb branch` | Create isolated preview environments |
+| `bb rls` | Manage row-level security policies |
+| `bb storage` | Manage S3-compatible object storage |
+| `bb webhook` | Manage webhooks |
+| `bb auth` | Manage authentication setup and providers |
 
 ---
 
@@ -283,21 +289,58 @@ Both patterns work together. Add `betterbase/` to any existing project.
 bun add @betterbase/client
 ```
 
-```typescript
-import { createClient } from '@betterbase/client'
+### React (hooks)
 
-const client = createClient({
-  baseUrl: 'http://localhost:3000',
+Wrap your app in the `BetterbaseProvider` and use the `useQuery` / `useMutation` hooks. Import your IaC function registrations from `@betterbase/core/iac`.
+
+```tsx
+import { BetterbaseProvider, useQuery, useMutation } from "@betterbase/client/iac"
+import { listPosts, createPost } from "./betterbase/queries/posts"
+import { createPost as createPostMutation } from "./betterbase/mutations/posts"
+
+function App() {
+  return (
+    <BetterbaseProvider config={{ url: "http://localhost:3000", projectSlug: "my-app" }}>
+      <Posts />
+    </BetterbaseProvider>
+  )
+}
+
+function Posts() {
+  const { data: posts, isLoading } = useQuery(listPosts, { published: true })
+  const create = useMutation(createPostMutation)
+
+  if (isLoading) return <p>Loading…</p>
+
+  return (
+    <ul>
+      {posts?.map((p) => (
+        <li key={p._id}>{p.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+### Vanilla (framework-agnostic)
+
+```typescript
+import { createBetterBaseClient } from "@betterbase/client/iac"
+import { listPosts, createPost } from "./betterbase/queries/posts"
+
+const client = createBetterBaseClient({
+  url: "http://localhost:3000",
+  projectSlug: "my-app",
 })
 
-// Use IaC functions
-const { data: posts } = await client.bff.queries.posts.listPosts({})
+// Query
+const posts = await client.query(listPosts, { published: true })
 
-// Mutations
-await client.bff.mutations.posts.createPost({
-  title: 'Hello',
-  content: 'World',
-  authorId: 'user-123',
+// Mutation
+await client.mutation(createPost, {
+  title: "Hello",
+  content: "World",
+  authorId: "user-123",
 })
 ```
 
@@ -319,7 +362,7 @@ docker-compose up -d
 
 ### Self-Hosted
 
-See [SELF_HOSTED.md](SELF_HOSTED.md) for full documentation.
+See [docs/docker-setup.md](docs/docker-setup.md) for full documentation.
 
 ```typescript
 database: {
@@ -456,7 +499,7 @@ We welcome contributions! Please follow these steps:
 ### Getting Started
 
 1. **Fork** the repository
-2. **Clone** your fork: `git clone https://github.com/your-username/betterbase.git`
+2. **Clone** your fork: `git clone https://github.com/weroperking/Betterbase.git`
 3. **Install** dependencies: `bun install`
 4. **Create** a branch: `git checkout -b feature/my-feature`
 
@@ -470,10 +513,10 @@ bun install
 bun run build
 
 # Run tests
-bun test
+bunx turbo run test
 
-# Run linting
-bun run lint
+# Lint across packages
+bunx turbo run lint
 ```
 
 ### Project Structure
@@ -481,38 +524,40 @@ bun run lint
 ```
 betterbase/
 ├── apps/
-│   └── test-project/      # Example/test project
+│   ├── dashboard/        # Admin dashboard (Vite)
+│   └── test-project/     # Example/test project
 ├── packages/
 │   ├── cli/              # @betterbase/cli
 │   ├── client/           # @betterbase/client
-│   └── core/             # @betterbase/core
-├── templates/            # Project templates
+│   ├── core/             # @betterbase/core
+│   ├── server/           # @betterbase/server
+│   └── shared/           # @betterbase/shared
+├── templates/            # Project templates (auth, base, iac)
 └── turbo.json            # Turborepo configuration
 ```
 
 ### Code Style
 
-We use Biome for code formatting and linting:
+We use [Biome](https://biomejs.dev/) for code formatting and linting:
 
 ```bash
-# Format code
-bun run format
+# Format and lint a package
+cd packages/cli
+bunx biome check src test
+bunx biome check --write src test
 
-# Lint code
-bun run lint
-
-# Fix auto-fixable issues
-bun run lint:fix
+# Or run via turbo across all packages
+bunx turbo run lint
 ```
 
 ### Testing
 
 ```bash
-# Run all tests
-bun test
+# Run all tests across packages
+bunx turbo run test
 
-# Run tests for specific package
-bun test --filter=@betterbase/cli
+# Run tests for a specific package
+cd packages/cli && bun test
 
 # Run tests in watch mode
 bun test --watch
@@ -638,7 +683,7 @@ SOFTWARE.
 | Resource | Link |
 |----------|------|
 | **GitHub** | [GitHub](https://github.com/weroperking/Betterbase) |
-| **Contributing Guide** | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Contributing Guide** | [Contributing](#contributing) |
 | **Good First Issues** | [Good First Issues](https://github.com/weroperking/Betterbase/labels/good-first-issue) |
 
 ---
@@ -647,6 +692,6 @@ SOFTWARE.
 
 **Built with ❤️ by Weroperking**
 
-[Website](#) • [Documentation](docs/README.md) • [Discord](https://discord.gg/R6Dm6Cgy2E) • [GitHub](https://github.com/weroperking/Betterbase) • [Twitter](#)
+[Documentation](docs/README.md) • [Discord](https://discord.gg/R6Dm6Cgy2E) • [GitHub](https://github.com/weroperking/Betterbase)
 
 </div>

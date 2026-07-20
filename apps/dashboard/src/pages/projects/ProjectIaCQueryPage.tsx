@@ -14,7 +14,8 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { useMutation } from "@tanstack/react-query";
+import { QK } from "@/lib/query-keys";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Database, Play } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router";
@@ -22,6 +23,7 @@ import { toast } from "sonner";
 
 export default function ProjectIaCQueryPage() {
 	const { projectId } = useParams();
+	const queryClient = useQueryClient();
 	const [sql, setSql] = useState("SELECT * FROM users LIMIT 10");
 	const [params, setParams] = useState("");
 
@@ -35,6 +37,7 @@ export default function ProjectIaCQueryPage() {
 		},
 		onSuccess: (data) => {
 			toast.success(`Retrieved ${data.row_count} rows`);
+			queryClient.invalidateQueries({ queryKey: QK.project(projectId!) });
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Query failed");

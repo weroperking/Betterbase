@@ -16,7 +16,7 @@ This phase addresses the gaps identified from competitive analysis with Convex a
 |---|---|---|
 | **Optimistic Updates** | P3-01 – P3-04 | Client-side immediate updates with automatic rollback on failure |
 | **SQL Query Access** | P3-05 – P3-08 | Raw SQL execution via ctx.db.execute() for power users |
-| **Full-Text Search** | P3-09 – P3-13 | PostgreSQL FTS integration in bbf/ schema and queries |
+| **Full-Text Search** | P3-09 – P3-13 | PostgreSQL FTS integration in betterbase/ schema and queries |
 | **Vector Search** | P3-14 – P3-18 | pgvector integration with similarity search in IaC layer |
 | **Better Query Diagnostics** | P3-19 – P3-22 | Query analyzer, slow query warnings, index suggestions |
 | **Data Portability** | P3-23 – P3-26 | Export/import tools, backup, migration utilities |
@@ -48,7 +48,7 @@ ctx.db.analyze(query)                            // Query diagnostics
 ### Optimistic Updates Pattern
 
 ```typescript
-// bbf/mutations/todos.ts
+// betterbase/mutations/todos.ts
 export const createTodo = mutation({
   args: { text: v.string() },
   // NEW: return optimistic value
@@ -62,7 +62,7 @@ export const createTodo = mutation({
 ### New Validators
 
 ```typescript
-// bbf/schema.ts
+// betterbase/schema.ts
 import { v } from "@betterbase/core/iac";
 
 export default defineSchema({
@@ -357,7 +357,7 @@ bb iac import --dry-run ./backup  # Preview without applying
 
 ### P3-25: Add backup scheduler
 
-**File:** `packages/server/src/routes/bbf/cron.ts`
+**File:** `packages/server/src/routes/betterbase/cron.ts`
 
 Allow scheduling automated backups:
 
@@ -377,7 +377,7 @@ backup("daily", "0 2 * * *", { retentionDays: 30 });
 
 **Files:**
 - `packages/core/src/iac/errors.ts` — New error classes
-- Update `packages/server/src/routes/bbf/index.ts` to use better errors
+- Update `packages/server/src/routes/betterbase/index.ts` to use better errors
 
 Make errors show:
 - What function failed
