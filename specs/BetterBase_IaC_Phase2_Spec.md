@@ -460,7 +460,7 @@ export class ProcessManager {
     const entryPoint = join(this._projectRoot, "src", "index.ts");
 
     this._proc = spawn({
-      cmd:    ["bun", "run", entryPoint],
+      cmd:    [process.execPath, "run", entryPoint],
       cwd:    this._projectRoot,
       env:    { ...process.env, NODE_ENV: "development" },
       stdout: "pipe",
@@ -545,8 +545,6 @@ type WatchEvent = {
 };
 
 type Handler = (event: WatchEvent) => void | Promise<void>;
-
-export class DevWatcher {
   private _handlers:  Handler[] = [];
   private _debounce:  Map<string, ReturnType<typeof setTimeout>> = new Map();
   private _debounceMs: number;
@@ -582,8 +580,14 @@ export class DevWatcher {
         if (![".ts", ".tsx", ".js", ".json"].includes(extname(fullPath))) return;
 
         const kind = this._classifyPath(rel);
-        this._debounced(fullPath, () => {
-          for (const h of this._handlers) h({ path: fullPath, relative: rel, kind });
+        this._debounced(fullPath, async () => {
+          for (const h of this._handlers) {
+            try {
+              await h({ path: fullPath, relative: rel, kind });
+            } catch (err) {
+              this._handleWatcherError(err, fullPath);
+            }
+          }
         });
       });
 
@@ -609,9 +613,17 @@ export class DevWatcher {
     return "server";
   }
 
-  private _debounced(key: string, fn: () => void) {
+  private _debounced(key: string, fn: () => void | Promise<void>) {
     clearTimeout(this._debounce.get(key));
     this._debounce.set(key, setTimeout(fn, this._debounceMs));
+  }
+
+  private _handleWatcherError(err: unknown, fullPath: string) {
+    if (err instanceof Error) {
+      error(`[dev] Handler failed for ${fullPath}: ${err.message}`);
+    } else {
+      error(`[dev] Handler failed for ${fullPath}: ${String(err)}`);
+    }
   }
 }
 ```
@@ -1528,11 +1540,13 @@ betterbaseRouter.post("/storage/generate-upload-url", requireAuth, async (c) => 
     Expires:    300,  // 5 minute window
   });
 
-  // Record the pending upload using the safe, validated schema helper (no raw
-  // string interpolation of untrusted identifiers).
+  // Record the pending upload in the per-project storage table using the safe,
+  // validated schema helper (no raw string interpolation of untrusted
+  // identifiers).
+  const storageSchema = `project_${projectSlug}`;
   const pool = getPool();
   await pool.query(
-    `INSERT INTO betterbase_meta.project_storage (project_slug, storage_id, s3_key, bucket, content_type)
+    `INSERT INTO "${storageSchema}"._iac_storage (project_slug, storage_id, s3_key, bucket, content_type)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (storage_id) DO NOTHING`,
     [projectSlug, storageId, s3Key, env.STORAGE_BUCKET ?? "betterbase", contentType ?? "application/octet-stream"]
@@ -1581,6 +1595,7 @@ CREATE TABLE IF NOT EXISTS betterbase_meta.iac_scheduled_jobs (
   max_attempts   INT NOT NULL DEFAULT 3,
   error_msg      TEXT,
   completed_at   TIMESTAMPTZ,
+  locked_at      TIMESTAMPTZ,   -- set when a worker claims the job; used for timeout recovery
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -1715,12 +1730,12 @@ export class JobWorker {
   }
 
   private async _poll() {
-    // Re-queue stuck running jobs first
+    // Re-queue stuck running jobs first (compare against the claim timestamp)
     await this._pool.query(
       `UPDATE betterbase_meta.iac_scheduled_jobs
        SET status = 'pending', error_msg = 'Requeued after timeout'
        WHERE status = 'running'
-         AND created_at < NOW() - INTERVAL '${JOB_LOCK_TIMEOUT} milliseconds'`
+         AND locked_at < NOW() - INTERVAL '${JOB_LOCK_TIMEOUT} milliseconds'`
     ).catch(() => {});
 
     // Claim a batch of pending jobs
@@ -1728,7 +1743,7 @@ export class JobWorker {
       id: string; project_slug: string; function_path: string; args: unknown; attempts: number;
     }>(
       `UPDATE betterbase_meta.iac_scheduled_jobs
-       SET status = 'running', attempts = attempts + 1
+       SET status = 'running', attempts = attempts + 1, locked_at = NOW()
        WHERE id IN (
          SELECT id FROM betterbase_meta.iac_scheduled_jobs
          WHERE status = 'pending' AND run_at <= NOW()
@@ -1865,6 +1880,8 @@ export interface BBFConfig {
   projectSlug?: string;
   /** Token getter — called on each request */
   getToken?:    () => string | null;
+  /** WS ticket getter — mints a short-lived ticket scoped to the project */
+  getWSTicket?: (projectSlug: string) => string | null;
 }
 
 interface BBFContextValue {
@@ -1882,27 +1899,47 @@ export function BetterbaseProvider({ config, children }: { config: BBFConfig; ch
   useEffect(() => {
     // Acquire a short-lived WebSocket ticket scoped to this project, then pass
     // it on the connection so the server can validate the project binding.
-    const ticket = getWSTicket?.(config.projectSlug ?? "default");
-    const wsUrl  = config.url.replace(/^http/, "ws") + `/betterbase/ws?project=${config.projectSlug ?? "default"}&ticket=${ticket ?? ""}`;
-    const ws     = new WebSocket(wsUrl);
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let closedByUs = false;
 
-    ws.onopen  = () => { setWsReady(true); };
-    ws.onclose = () => {
-      setWsReady(false);
-      // Reconnect after 3 seconds
-      setTimeout(() => { wsRef.current = new WebSocket(wsUrl); }, 3_000);
+    // Shared connection setup path: obtains a fresh short-lived ticket and
+    // constructs the WebSocket with fresh onopen/onclose/onmessage handlers.
+    function connect(): WebSocket {
+      const ticket = getWSTicket?.(config.projectSlug ?? "default");
+      const wsUrl  = config.url.replace(/^http/, "ws") + `/betterbase/ws?project=${config.projectSlug ?? "default"}&ticket=${ticket ?? ""}`;
+      const ws     = new WebSocket(wsUrl);
+
+      ws.onopen  = () => { setWsReady(true); };
+      ws.onclose = () => {
+        setWsReady(false);
+        if (closedByUs) return;
+        // Reconnect after 3 seconds with a fresh ticket + connection
+        reconnectTimer = setTimeout(() => { wsRef.current = connect(); }, 3_000);
+      };
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
+      };
+
+      return ws;
+    }
+
+    // Obtain a new short-lived ticket before constructing the WebSocket.
+    wsRef.current = connect();
+
+    return () => {
+      closedByUs = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
     };
-
-    wsRef.current = ws;
-
-    // Handle pings
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
-    };
-
-    return () => { ws.close(); };
   }, [config.url, config.projectSlug]);
+
+  // Helper that mints a short-lived WS ticket. In a real implementation this
+  // calls the server's ticket endpoint after auth. Projects can supply a
+  // `getWSTicket` via config to override this default.
+  function getWSTicket(projectSlug: string): string | null {
+    return config.getWSTicket?.(projectSlug) ?? null;
+  }
 
   return (
     <BBFContext.Provider value={{ config, ws: wsRef.current, wsReady }}>
@@ -1994,7 +2031,7 @@ export function useQuery<TReturn>(
   args: Record<string, unknown> = {}
 ): UseQueryResult<TReturn> {
   const { config, ws, wsReady } = useBBFContext();
-  const path     = (fn as any).__bbfPath as string;
+  const path     = (fn as any).__betterbasePath as string;
   const argsJson = useMemo(() => JSON.stringify(args), [JSON.stringify(args)]);
 
   const [data,   setData]   = useState<TReturn | undefined>(undefined);
@@ -2019,7 +2056,7 @@ export function useQuery<TReturn>(
       setError(e);
       setStatus("error");
     }
-  }, [config.url, path, argsJson, config.getToken]);
+  }, [config.url, path, argsJson, config.getToken, config.projectSlug]);
 
   // Fetch on mount and args change
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -2075,7 +2112,7 @@ export function useMutation<TReturn = void>(
   fn: MutationRegistration<any, TReturn>
 ): UseMutationResult<Record<string, unknown>, TReturn> {
   const { config } = useBBFContext();
-  const path = (fn as any).__bbfPath as string;
+  const path = (fn as any).__betterbasePath as string;
 
   const [isPending, setIsPending] = useState(false);
   const [error,     setError]     = useState<Error | null>(null);
@@ -2092,11 +2129,10 @@ export function useMutation<TReturn = void>(
     } finally {
       setIsPending(false);
     }
-  }, [config.url, path, config.getToken]);
+  }, [config.url, path, config.getToken, config.projectSlug]);
 
   const mutate = useCallback((args: Record<string, unknown>) => {
-    mutateAsync(args).catch(() => {}); // fire-and-forget variant
-    return mutateAsync(args);
+    return mutateAsync(args); // fire-and-forget variant — reuses the same promise
   }, [mutateAsync]);
 
   return {
@@ -2115,10 +2151,10 @@ export function useAction<TReturn = void>(
   fn: ActionRegistration<any, TReturn>
 ): UseMutationResult<Record<string, unknown>, TReturn> {
   const { config } = useBBFContext();
-  const path = (fn as any).__bbfPath as string;
+  const path = (fn as any).__betterbasePath as string;
 
   // Actions follow the same client pattern as mutations
-  const mutationFn = { ...fn, __bbfPath: path } as unknown as MutationRegistration<any, TReturn>;
+  const mutationFn = { ...fn, __betterbasePath: path } as unknown as MutationRegistration<any, TReturn>;
   return useMutation(mutationFn);
 }
 ```
@@ -2172,7 +2208,7 @@ export function usePaginatedQuery<T>(
   opts:     { initialNumItems?: number } = {}
 ): UsePaginatedQueryResult<T> {
   const { config } = useBBFContext();
-  const path      = (fn as any).__bbfPath as string;
+  const path      = (fn as any).__betterbasePath as string;
   const numItems  = opts.initialNumItems ?? 10;
 
   const [results,   setResults]   = useState<T[]>([]);
@@ -2180,13 +2216,18 @@ export function usePaginatedQuery<T>(
   const [isDone,    setIsDone]    = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [status,    setStatus]    = useState<"loading" | "success" | "error">("loading");
+  const cancelledRef = useRef(false);
 
-  // Initial load
-  useState(() => {
-    loadPage(null);
-  });
+  // Initial load — run after render, with cancellation so stale requests
+  // don't update state if the component unmounts or re-runs.
+  useEffect(() => {
+    cancelledRef.current = false;
+    loadPage(null).catch(() => {});
+    return () => { cancelledRef.current = true; };
+  }, []);
 
   async function loadPage(cursor: string | null) {
+    if (cancelledRef.current) return;
     setIsLoading(true);
     try {
       const token = config.getToken?.();
@@ -2233,13 +2274,16 @@ export const listTodosPaginated = query({
     const q = ctx.db.query("todos").order("desc", "_createdAt").order("desc", "_id");
 
     // Advance past the cursor: the cursor is the composite of the last item's
-    // (_createdAt, _id). Compare lexically so successive loadMore() calls return
-    // the next page instead of repeating the first one.
+    // (_createdAt, _id). Use a lexicographic predicate so successive loadMore()
+    // calls return the next page instead of repeating the first one:
+    //   _createdAt < cursorCreated
+    //   OR (_createdAt == cursorCreated AND _id < cursorId)
     let builder = q;
     if (args.cursor) {
       const [cursorCreated, cursorId] = args.cursor.split("|");
-      builder = builder.filter("_createdAt", "lt", cursorCreated);
-      builder = builder.filter("_id", "lt", cursorId);
+      builder = builder.filter((_createdAt: string, _id: string) =>
+        _createdAt < cursorCreated || (_createdAt === cursorCreated && _id < cursorId)
+      );
     }
 
     const all    = await builder.take(limit + 1).collect();
@@ -2324,7 +2368,7 @@ export function createBBFClient(opts: {
   }
 
   async function call(kind: string, fn: any, args: unknown): Promise<unknown> {
-    const path  = fn.__bbfPath ?? "unknown";
+    const path  = fn.__betterbasePath ?? "unknown";
     const token = getToken?.();
     const res   = await fetch(`${url}/betterbase/${path}`, {
       method:  "POST",
@@ -2348,7 +2392,7 @@ export function createBBFClient(opts: {
     action:   (fn, args) => call("actions",   fn, args) as any,
 
     subscribe(fn, args, onChange) {
-      const path = (fn as any).__bbfPath ?? "unknown";
+      const path = (fn as any).__betterbasePath ?? "unknown";
       if (!listeners.has(path)) listeners.set(path, new Set());
       listeners.get(path)!.add(onChange);
 

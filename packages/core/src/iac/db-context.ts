@@ -341,7 +341,9 @@ export class DatabaseWriter extends DatabaseReader {
 					? "UPDATE"
 					: "DELETE";
 			this._emitChange("unknown", type, ""); // Invalidate all subscriptions
-			this._dispatch("unknown", type, {}); // Fire side-effect hooks (webhooks)
+			// Suppress table-scoped webhook dispatch: raw SQL writes cannot reliably
+			// derive the affected table/payload, and "unknown"/{} would never match
+			// configured webhooks. The cache-invalidation above is preserved.
 		}
 
 		return { rows, rowCount: rowCount ?? 0 };

@@ -8,7 +8,14 @@ import { getPool } from "../../../lib/db";
 export const iacSyncRoutes = new Hono();
 
 function schemaName(project: { slug: string }) {
-	return `project_${project.slug}`;
+	// Normalize the slug into a safe, valid SQL identifier. Slugs may contain
+	// hyphens (invalid in unquoted identifiers); replace unsupported characters
+	// with underscores while preserving valid lowercase alphanumeric slugs.
+	const safeSlug = project.slug
+		.toLowerCase()
+		.replace(/[^a-z0-9_]/g, "_")
+		.replace(/^[^a-z]/, "_");
+	return `project_${safeSlug}`;
 }
 
 // Allowlist for SQL identifiers interpolated into CREATE TABLE statements.
@@ -40,11 +47,31 @@ iacSyncRoutes.post(
 										.min(1)
 										.max(63)
 										.regex(SAFE_IDENTIFIER, "Column name contains unsafe characters"),
-									type: z
-										.string()
-										.min(1)
-										.max(63)
-										.regex(SAFE_IDENTIFIER, "Column type contains unsafe characters"),
+									type: z.enum(
+										[
+											"TEXT",
+											"INTEGER",
+											"BIGINT",
+											"SMALLINT",
+											"BOOLEAN",
+											"TIMESTAMPTZ",
+											"TIMESTAMP",
+											"DATE",
+											"TIME",
+											"NUMERIC",
+											"REAL",
+											"DOUBLE PRECISION",
+											"UUID",
+											"JSONB",
+											"JSON",
+											"BYTEA",
+											"VARCHAR",
+											"CHAR",
+										],
+										{
+											message: "Unsupported column type",
+										},
+									),
 									nullable: z.boolean().default(true),
 								}),
 							)
@@ -160,6 +187,9 @@ iacSyncRoutes.post(
 		const { envConfig } = c.req.valid("json");
 		const pool = getPool();
 		const s = schemaName(project);
+
+		// Ensure the project schema exists before mutating it.
+		await provisionProjectSchema(pool, project.slug);
 
 		const stored: string[] = [];
 		for (const entry of envConfig) {

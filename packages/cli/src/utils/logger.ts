@@ -113,10 +113,11 @@ export function dim(msg: string): void {
 }
 
 export function step(n: number, total: number, msg: string): void {
-	const badgeValue = (chalk.bgCyan as ColorFn & { black: ColorFn; white: ColorFn }).black(
-		` ${n}/${total} `,
-	);
-	console.log(`${badgeValue} ${msg}`);
+	if (!colorsEnabled()) {
+		console.log(` ${n}/${total}  ${msg}`);
+		return;
+	}
+	console.log(`${C.bgCyan}${C.black} ${n}/${total} ${C.reset} ${msg}`);
 }
 
 export function section(title: string): void {

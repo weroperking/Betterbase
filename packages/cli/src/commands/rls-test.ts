@@ -327,6 +327,8 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 
 		await sql`CREATE SCHEMA ${sql(testSchema)}`;
 
+		let existingUidDef: string | null = null;
+
 		try {
 			// Copy table structure
 			logger.info("Copying table structure...");
@@ -383,7 +385,7 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 
 			// Load and apply policies
 			const policies = await loadTablePolicies(projectRoot, tableName);
-			logger.info(`Applying ${policies.length} policy(ieue)...`);
+			logger.info(`Applying ${policies.length} policy(ies)...`);
 
 			for (const policy of policies) {
 				const policyStmts = generatePolicySQL(testSchema, tableName, policy);
@@ -391,6 +393,19 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 					await sql.unsafe(stmt);
 				}
 			}
+
+			// Save any existing auth.uid() definition so we can restore it (or
+			// drop it if it didn't exist) during cleanup. This avoids clobbering
+			// a user-defined function with the same name.
+			const uidRows = await sql.unsafe(`
+				SELECT pg_get_functiondef(('auth.uid'::regproc)::oid) AS definition
+				WHERE EXISTS (
+					SELECT 1 FROM pg_proc p
+					JOIN pg_namespace n ON n.oid = p.pronamespace
+					WHERE n.nspname = 'auth' AND p.proname = 'uid'
+				)
+			`);
+			existingUidDef = (uidRows[0] as { definition?: string } | undefined)?.definition ?? null;
 
 			// Create the auth.uid() bridge function the policies rely on. The
 			// generated policies use `auth.uid() = user_id`, so we provision the
@@ -587,6 +602,15 @@ export async function runRLSTestCommand(projectRoot: string, tableName: string):
 			// Cleanup: Drop test schema
 			logger.info("Cleaning up test schema...");
 			await sql`DROP SCHEMA IF EXISTS ${sql(testSchema)} CASCADE`;
+
+			// Restore the original auth.uid() definition, or drop it if none
+			// existed before this test, so we don't leave the test bridge behind.
+			if (existingUidDef) {
+				await sql.unsafe(existingUidDef);
+			} else {
+				await sql.unsafe("DROP FUNCTION IF EXISTS auth.uid()");
+			}
+
 			logger.success("Test schema cleaned up");
 		}
 	} finally {
