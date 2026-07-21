@@ -16,8 +16,7 @@ export default defineSchema({
     authorId: v.optional(v.string()),
     body: v.string(),
   })
-    .index("by_room", ["roomId", "_createdAt"])
-    .index("by_room_created", ["roomId", "_createdAt"]),
+    .index("by_room", ["roomId", "_createdAt"]),
 
   presence: defineTable({
     roomId: v.id("rooms"),

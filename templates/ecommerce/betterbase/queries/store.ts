@@ -24,7 +24,7 @@ export const getProduct = query({
 
 /** Get the current cart and its line items for a user. */
 export const getCart = query({
-  args: { userId: v.optional(v.string()) },
+  args: { userId: v.string() },
   handler: async (ctx, args) => {
     let cart = await ctx.db
       .query("carts")

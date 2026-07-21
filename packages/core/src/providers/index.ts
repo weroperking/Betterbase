@@ -40,6 +40,7 @@ export {
 	ManagedProviderAdapter,
 	createManagedProvider,
 } from "./managed";
+export { ManagedProviderNotSupportedError } from "./errors";
 export {
 	GuardrailEngine,
 	GuardrailViolationError,
@@ -58,6 +59,7 @@ export {
 } from "./tenant-mode";
 
 import type { ProviderType } from "@betterbase/shared";
+import { ManagedProviderNotSupportedError } from "./errors";
 import { NeonProviderAdapter } from "./neon";
 import { PlanetScaleProviderAdapter } from "./planetscale";
 import { PostgresProviderAdapter } from "./postgres";
@@ -66,20 +68,6 @@ import { TursoProviderAdapter } from "./turso";
 import type { ProviderAdapter, ProviderConfig } from "./types";
 import { parseProviderConfig } from "./types";
 
-/**
- * Error thrown when the 'managed' provider type is selected
- * This is a placeholder for future implementation
- */
-export class ManagedProviderNotSupportedError extends Error {
-	constructor() {
-		super(
-			'The "managed" provider type is not yet supported. ' +
-				"This feature is coming soon. Please use one of the supported providers: " +
-				"neon, turso, planetscale, supabase, or postgres.",
-		);
-		this.name = "ManagedProviderNotSupportedError";
-	}
-}
 
 /**
  * Resolve the appropriate provider adapter based on the configuration

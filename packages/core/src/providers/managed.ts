@@ -4,7 +4,7 @@ import type {
 	ProviderAdapter,
 	ProviderConfig,
 } from "./types";
-import { ManagedProviderNotSupportedError } from "./index";
+import { ManagedProviderNotSupportedError } from "./errors";
 
 /**
  * Placeholder adapter for the declared-but-unsupported `managed` provider.

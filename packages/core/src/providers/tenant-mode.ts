@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+	TenantModeProviderSchema,
 	TenantModeSchema,
 	type TenantMode,
+	type TenantModeProvider,
 } from "./guardrail";
 
 // ─── Phase C contract shapes ───────────────────────────────────────────────
@@ -20,22 +22,22 @@ export const SetTenantModeRequestSchema = z.object({
 	enabled: z.boolean().optional(),
 	tenantColumn: z.string().min(1).optional(),
 	strict: z.boolean().optional(),
-	provider: z.enum(["postgres", "neon", "turso", "planetscale", "supabase"]).optional(),
+	provider: TenantModeProviderSchema.optional(),
 });
 
 export type SetTenantModeRequest = z.infer<typeof SetTenantModeRequestSchema>;
 
 /**
  * Effective tenant-mode status returned by the contract endpoint.
- * `enforcedAt` reflects whether application-layer enforcement is active
- * (always true when tenant mode is enabled, since the guardrail engine
- * enforces regardless of provider RLS support).
+ * `enforcedAt` reflects where tenant scoping is enforced: "database" when
+ * database-level enforcement (RLS) is active, "application" when
+ * application-level enforcement is used, and null when tenant mode is disabled.
  */
 export interface TenantModeStatus {
 	enabled: boolean;
 	tenantColumn: string;
 	strict: boolean;
-	provider?: "postgres" | "neon" | "turso" | "planetscale" | "supabase";
+	provider?: TenantModeProvider;
 	enforcedAt: "application" | "database" | null;
 }
 

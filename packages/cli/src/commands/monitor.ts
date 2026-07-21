@@ -3,6 +3,7 @@ import path from "node:path";
 import chalk from "chalk";
 import { z } from "zod";
 import { loadCredentials } from "../utils/credentials";
+import { apiRequest } from "../utils/api-client";
 import * as logger from "../utils/logger";
 import {
 	emitJson,
@@ -111,14 +112,8 @@ export async function runMonitorLogs(options: MonitorOptions): Promise<void> {
 }
 
 async function fetchServerMetrics(): Promise<Record<string, unknown> | null> {
-	const creds = loadCredentials();
-	if (!creds?.token || !creds.server_url) return null;
 	try {
-		const res = await fetch(`${creds.server_url}/admin/metrics/overview`, {
-			headers: { Authorization: `Bearer ${creds.token}` },
-		});
-		if (!res.ok) return null;
-		const body = (await res.json()) as { metrics?: Record<string, unknown> };
+		const body = await apiRequest<{ metrics?: Record<string, unknown> }>("/admin/metrics/overview");
 		return body.metrics ?? null;
 	} catch {
 		return null;

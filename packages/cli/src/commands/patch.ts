@@ -60,7 +60,7 @@ interface AuditResult {
 async function runAudit(projectRoot: string): Promise<AuditResult> {
 	const pm = detectPackageManager(projectRoot);
 	// bun audit --json, fallback to npm audit --json.
-	let cmd: string[] = ["bun", "audit", "--json"];
+	let cmd: string[] = [process.execPath, "audit", "--json"];
 	if (pm === "npm") cmd = ["npm", "audit", "--json"];
 
 	let result = await runSubprocess(cmd, { cwd: projectRoot, timeoutMs: 120_000 });
@@ -195,7 +195,7 @@ export async function runPatchApply(options: PatchOptions): Promise<void> {
 		return;
 	}
 
-	const fixCmd = pm === "npm" ? ["npm", "audit", "fix"] : ["bun", "update"];
+	const fixCmd = pm === "npm" ? ["npm", "audit", "fix"] : [process.execPath, "update"];
 	const result = await runSubprocess(fixCmd, { cwd: projectRoot, timeoutMs: 300_000 });
 
 	const logEntry = {

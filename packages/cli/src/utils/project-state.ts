@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -155,7 +155,7 @@ export function detectCiPlatform(projectRoot: string): "github" | "gitlab" | "bi
 	const gitConfig = path.join(projectRoot, ".git", "config");
 	if (existsSync(gitConfig)) {
 		try {
-			const contents = require("node:fs").readFileSync(gitConfig, "utf8") as string;
+			const contents = readFileSync(gitConfig, "utf8");
 			if (contents.includes("gitlab.com")) return "gitlab";
 			if (contents.includes("bitbucket.org")) return "bitbucket";
 		} catch {
@@ -196,6 +196,7 @@ export function fileTimestamp(date: Date = new Date()): string {
  * Check whether a binary is available on the PATH.
  */
 export async function hasBinary(name: string): Promise<boolean> {
-	const result = await runSubprocess(["which", name], { timeoutMs: 5000 });
+	const cmd = process.platform === "win32" ? ["where", name] : ["which", name];
+	const result = await runSubprocess(cmd, { timeoutMs: 5000 });
 	return result.success && result.stdout.trim().length > 0;
 }

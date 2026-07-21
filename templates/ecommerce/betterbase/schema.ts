@@ -14,13 +14,12 @@ export default defineSchema({
     sku: v.string(),
     active: v.boolean(),
   })
-    .index("by_sku", ["sku"])
     .uniqueIndex("by_sku_unique", ["sku"])
     .index("by_active", ["active"])
     .searchIndex("search_products", { searchField: "name" }),
 
   carts: defineTable({
-    userId: v.optional(v.string()),
+    userId: v.string(),
     status: v.string(),
   }).index("by_user", ["userId"]),
 
@@ -33,7 +32,7 @@ export default defineSchema({
     .index("by_cart_product", ["cartId", "productId"]),
 
   orders: defineTable({
-    userId: v.optional(v.string()),
+    userId: v.string(),
     stripePaymentIntentId: v.optional(v.string()),
     totalCents: v.number(),
     currency: v.string(),

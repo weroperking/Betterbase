@@ -29,6 +29,9 @@ export const updateItem = mutation({
     const patch = Object.fromEntries(
       Object.entries(fields).filter(([, value]) => value !== undefined),
     );
+    if (Object.keys(patch).length === 0) {
+      return ctx.db.get("items", id);
+    }
     await ctx.db.patch("items", id, patch);
     return ctx.db.get("items", id);
   },

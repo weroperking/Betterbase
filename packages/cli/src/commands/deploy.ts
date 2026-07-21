@@ -80,7 +80,7 @@ async function runBuild(projectRoot: string): Promise<boolean> {
 	} catch {
 		return true;
 	}
-	const result = await runSubprocess(["bun", "run", "build"], { cwd: projectRoot, timeoutMs: 300_000 });
+	const result = await runSubprocess([process.execPath, "run", "build"], { cwd: projectRoot, timeoutMs: 300_000 });
 	return result.success;
 }
 

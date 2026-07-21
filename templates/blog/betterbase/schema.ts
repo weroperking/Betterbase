@@ -12,8 +12,7 @@ export default defineSchema({
     authorId: v.optional(v.string()),
     published: v.boolean(),
   })
-    .index("by_slug", ["slug"])
-    .uniqueIndex("by_slug_unique", ["slug"])
+    .uniqueIndex("by_slug", ["slug"])
     .index("by_published", ["published", "_createdAt"])
     .searchIndex("search_posts", { searchField: "content" }),
 
@@ -21,8 +20,7 @@ export default defineSchema({
     name: v.string(),
     slug: v.string(),
   })
-    .index("by_slug", ["slug"])
-    .uniqueIndex("by_slug_unique", ["slug"]),
+    .uniqueIndex("by_slug", ["slug"]),
 
   post_tags: defineTable({
     postId: v.id("posts"),

@@ -20,6 +20,9 @@ const scaleConfigSchema = z.object({
 	cpu: z.number().int().min(1).max(100),
 	memory: z.number().int().min(1).max(100),
 	currentReplicas: z.number().int().nonnegative(),
+}).refine((data) => data.min <= data.max, {
+	message: "min must be <= max",
+	path: ["max"],
 });
 
 type ScaleConfig = z.infer<typeof scaleConfigSchema>;

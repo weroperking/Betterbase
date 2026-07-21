@@ -89,7 +89,9 @@ async function loadConfig(projectRoot: string): Promise<InfraConfig | null> {
 	if (!existsSync(file)) return null;
 	const raw = await readJson<unknown>(file, null);
 	if (raw === null) return null;
-	return infraConfigSchema.parse(raw);
+	const result = infraConfigSchema.safeParse(raw);
+	if (!result.success) return null;
+	return result.data;
 }
 
 export async function runInfraInit(options: InfraOptions): Promise<void> {

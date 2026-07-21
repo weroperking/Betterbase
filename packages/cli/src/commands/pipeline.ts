@@ -285,7 +285,8 @@ export async function runPipelineRun(options: PipelineOptions): Promise<void> {
 
 	for (const step of runnable) {
 		const start = Date.now();
-		const cmd = step.command.split(" ");
+		let cmd = step.command.split(" ");
+		if (cmd[0] === "bun") cmd[0] = process.execPath;
 		const result = await runSubprocess(cmd, { cwd: projectRoot, timeoutMs: 300_000 });
 		const durationMs = Date.now() - start;
 		const status = result.success ? "success" : "failed";

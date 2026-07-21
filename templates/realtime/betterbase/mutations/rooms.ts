@@ -41,7 +41,7 @@ export const updatePresence = mutation({
     if (existing) {
       await ctx.db.patch("presence", existing._id, {
         status: args.status,
-        lastSeen: new Date().toISOString() as unknown as Date,
+        lastSeen: new Date().toISOString(),
       });
       return existing._id;
     }
@@ -49,7 +49,7 @@ export const updatePresence = mutation({
       roomId: args.roomId,
       userId: args.userId,
       status: args.status,
-      lastSeen: new Date().toISOString() as unknown as Date,
+      lastSeen: new Date().toISOString(),
     });
   },
 });

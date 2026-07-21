@@ -11,6 +11,7 @@
   "dependencies": {
     "@betterbase/core":   "workspace:*",
     "@betterbase/client": "workspace:*",
+    "@betterbase/server": "workspace:*",
     "hono": "^4.0.0"
   }
 }

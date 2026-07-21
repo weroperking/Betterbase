@@ -1,10 +1,10 @@
 # modules/
 
-Shared server-side logic imported by your `bbf/` functions.
+Shared server-side logic imported by your `betterbase/` functions.
 
 **Rules:**
 - No Hono imports. No HTTP concepts (no `Context`, no `c.req`, no `c.json`).
-- No direct DB calls. Use `ctx.db` inside your `bbf/` functions instead.
+- No direct DB calls. Use `ctx.db` inside your `betterbase/` functions instead.
 - Pure TypeScript — accepts plain arguments, returns plain values.
 - Can import from `@betterbase/core/iac` for types only.
 
@@ -18,7 +18,7 @@ export async function sendWelcomeEmail(to: string, name: string) {
 ```
 
 ```typescript
-// bbf/mutations/users.ts
+// betterbase/mutations/users.ts
 import { mutation } from "@betterbase/core/iac";
 import { v } from "@betterbase/core/iac";
 import { sendWelcomeEmail } from "../../src/modules/email";

@@ -18,7 +18,7 @@ export const createProduct = mutation({
 /** Add a product to a user's cart (creating the cart if needed). */
 export const addToCart = mutation({
   args: {
-    userId: v.optional(v.string()),
+    userId: v.string(),
     productId: v.id("products"),
     quantity: v.number(),
   },
@@ -65,7 +65,7 @@ export const addToCart = mutation({
  */
 export const checkout = mutation({
   args: {
-    userId: v.optional(v.string()),
+    userId: v.string(),
     stripePaymentIntentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {

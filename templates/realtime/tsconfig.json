@@ -8,5 +8,5 @@
     "types": ["bun"],
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "bbf/**/*.ts", "betterbase.config.ts"]
+  "include": ["src/**/*.ts", "betterbase/**/*.ts", "betterbase.config.ts"]
 }

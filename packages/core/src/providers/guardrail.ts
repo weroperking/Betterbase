@@ -117,6 +117,13 @@ export class GuardrailEngine {
 		if (!this.isTenantTable(table, opts)) return;
 
 		if (opts.bypass) {
+			if (!opts.bypassReason) {
+				throw new GuardrailViolationError(
+					"write",
+					table,
+					"bypass requires a reason",
+				);
+			}
 			this.auditBypass("write", table, opts.bypassReason);
 			return;
 		}
@@ -130,8 +137,6 @@ export class GuardrailEngine {
 				`write to tenant-scoped table requires a ${this.mode.tenantColumn} value or filter`,
 			);
 		}
-
-		this.warnAppEnforced("write", table);
 	}
 
 	/**
@@ -144,6 +149,13 @@ export class GuardrailEngine {
 		if (!this.mode.strict) return;
 
 		if (opts.bypass) {
+			if (!opts.bypassReason) {
+				throw new GuardrailViolationError(
+					"read",
+					table,
+					"bypass requires a reason",
+				);
+			}
 			this.auditBypass("read", table, opts.bypassReason);
 			return;
 		}
@@ -157,15 +169,13 @@ export class GuardrailEngine {
 				`strict mode requires a ${this.mode.tenantColumn} filter on reads of this table`,
 			);
 		}
-
-		this.warnAppEnforced("read", table);
 	}
 
 	/**
 	 * Build a tenant context object carrying the bound tenant id. This is used
 	 * to propagate scoping into queries/mutations created for a tenant.
 	 */
-	withTenant(_ctx: unknown, tenantId: string): { tenantId: string } {
+	withTenant(ctx: { [key: string]: unknown }, tenantId: string): { tenantId: string } {
 		return { tenantId };
 	}
 
