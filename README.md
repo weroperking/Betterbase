@@ -470,28 +470,6 @@ This ensures users can only access their own data.
 
 ---
 
-## Ask Deepwiki
-
-> *Your AI-powered development assistant, integrated directly into Betterbase.*
-
-Ask Deepwiki provides intelligent context for AI-assisted development:
-
-- **Smart Code Context**: Automatic `.betterbase-context.json` generation
-- **IaC Analysis**: Understand your schema, queries, and mutations
-- **Query Optimization**: Get recommendations for better performance
-- **Documentation Generation**: Auto-generate docs from your code
-
-**Deepwiki Badge**: The badge at the top of this README links to [Ask Deepwiki](https://deepwiki.com/weroperking/Betterbase), where you can chat with an AI that understands your entire Betterbase project.
-
-### Using Ask Deepwiki
-
-1. **Development**: Get instant answers about your IaC layer
-2. **Debugging**: Understand query behavior and optimization
-3. **Onboarding**: New team members can ask about your architecture
-4. **Refactoring**: Get AI suggestions for improving your code
-
----
-
 ## Contributing
 
 We welcome contributions! Please follow these steps:
