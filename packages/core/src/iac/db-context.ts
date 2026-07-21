@@ -1,5 +1,11 @@
 import { nanoid } from "nanoid";
 import type { Pool } from "pg";
+import {
+	GuardrailEngine,
+	GuardrailViolationError,
+	type EnforceOptions,
+	type TenantMode,
+} from "../providers/guardrail";
 
 // ─── Query Builder (chainable) ─────────────────────────────────────────────
 
@@ -13,11 +19,13 @@ export class IaCQueryBuilder<T = unknown> {
 	private _orderDir: "ASC" | "DESC" = "ASC";
 	private _limit: number | null = null;
 	private _indexName: string | null = null;
+	private _tenantId?: string;
 
-	constructor(table: string, pool: Pool, schema: string) {
+	constructor(table: string, pool: Pool, schema: string, tenantId?: string) {
 		this._table = table;
 		this._pool = pool;
 		this._schema = schema;
+		this._tenantId = tenantId;
 	}
 
 	/** Filter using an index — short-circuits to index-aware SQL */
@@ -49,10 +57,17 @@ export class IaCQueryBuilder<T = unknown> {
 	private _buildSQL(): { sql: string; params: unknown[] } {
 		const table = `"${this._schema}"."${this._table}"`;
 		let sql = `SELECT * FROM ${table}`;
-		if (this._filters.length) sql += ` WHERE ${this._filters.join(" AND ")}`;
+		const params = this._params.slice();
+		const filters = this._filters.slice();
+		if (this._tenantId) {
+			const idx = params.length + 1;
+			filters.unshift(`"tenant_id" = $${idx}`);
+			params.push(this._tenantId);
+		}
+		if (filters.length) sql += ` WHERE ${filters.join(" AND ")}`;
 		if (this._orderBy) sql += ` ORDER BY "${this._orderBy}" ${this._orderDir}`;
 		if (this._limit) sql += ` LIMIT ${this._limit}`;
-		return { sql, params: this._params };
+		return { sql, params };
 	}
 
 	async collect(): Promise<T[]> {
@@ -145,20 +160,41 @@ export class DatabaseReader {
 	constructor(
 		protected _pool: Pool,
 		protected _schema: string,
+		/** Optional guardrail engine for tenant-mode enforcement. */
+		protected _guardrail?: GuardrailEngine | null,
+		/** Active tenant id for this context (when tenant-scoped). */
+		protected _tenantId?: string,
+		/** Tables exempt from tenant scoping. */
+		protected _tenantExemptTables: string[] = [],
 	) {}
+
+	/** Build tenant-scoped enforcement options for a given table. */
+	protected _enforceOpts(table: string): EnforceOptions {
+		return {
+			tenantId: this._tenantId,
+			exemptTables: this._tenantExemptTables,
+		};
+	}
+
+	_contextParams(): { pool: Pool; schema: string; guardrail?: GuardrailEngine | null; tenantId?: string; tenantExemptTables: string[] } {
+		return { pool: this._pool, schema: this._schema, guardrail: this._guardrail, tenantId: this._tenantId, tenantExemptTables: this._tenantExemptTables };
+	}
 
 	/** Get a document by ID */
 	async get<T = unknown>(table: string, id: string): Promise<T | null> {
-		const { rows } = await this._pool.query(
-			`SELECT * FROM "${this._schema}"."${table}" WHERE _id = $1 LIMIT 1`,
-			[id],
-		);
+		this._guardrail?.enforceRead(table, this._enforceOpts(table));
+		const query = this._tenantId
+			? `SELECT * FROM "${this._schema}"."${table}" WHERE _id = $1 AND tenant_id = $2 LIMIT 1`
+			: `SELECT * FROM "${this._schema}"."${table}" WHERE _id = $1 LIMIT 1`;
+		const params = this._tenantId ? ([id, this._tenantId] as unknown[]) : ([id] as unknown[]);
+		const { rows } = await this._pool.query(query, params);
 		return (rows[0] as T) ?? null;
 	}
 
 	/** Start a query builder for a table */
 	query<T = unknown>(table: string): IaCQueryBuilder<T> {
-		return new IaCQueryBuilder<T>(table, this._pool, this._schema);
+		this._guardrail?.enforceRead(table, this._enforceOpts(table));
+		return new IaCQueryBuilder<T>(table, this._pool, this._schema, this._tenantId);
 	}
 
 	/** Execute raw SQL (read-only). Automatically prefixes tables with project schema.
@@ -271,9 +307,14 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Insert a document, returning its generated ID */
 	async insert(table: string, data: Record<string, unknown>): Promise<string> {
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		const id = nanoid();
 		const now = new Date();
-		const doc = { ...data, _id: id, _createdAt: now, _updatedAt: now };
+		const doc: Record<string, unknown> = { ...data, _id: id, _createdAt: now, _updatedAt: now };
+
+		if (this._tenantId && !("tenant_id" in doc)) {
+			doc.tenant_id = this._tenantId;
+		}
 
 		const keys = Object.keys(doc)
 			.map((k) => `"${k}"`)
@@ -296,14 +337,17 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Partial update — merges provided fields, updates `_updatedAt` */
 	async patch(table: string, id: string, fields: Record<string, unknown>): Promise<void> {
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
 		const updates = Object.entries(fields)
 			.map(([k], i) => `"${k}" = $${i + 2}`)
 			.join(", ");
-		const values = [id, ...Object.values(fields)];
-		await this._pool.query(
-			`UPDATE "${this._schema}"."${table}" SET ${updates}, "_updatedAt" = NOW() WHERE _id = $1`,
-			values as any[],
-		);
+		const values = this._tenantId
+			? [id, this._tenantId, ...Object.values(fields)]
+			: [id, ...Object.values(fields)];
+		const query = this._tenantId
+			? `UPDATE "${this._schema}"."${table}" SET ${updates}, "_updatedAt" = NOW() WHERE _id = $1 AND tenant_id = $2`
+			: `UPDATE "${this._schema}"."${table}" SET ${updates}, "_updatedAt" = NOW() WHERE _id = $1`;
+		await this._pool.query(query, values as any[]);
 		this._emitChange(table, "UPDATE", id);
 		this._dispatch(table, "UPDATE", { _id: id, ...fields });
 	}
@@ -315,7 +359,12 @@ export class DatabaseWriter extends DatabaseReader {
 
 	/** Delete a document by ID */
 	async delete(table: string, id: string): Promise<void> {
-		await this._pool.query(`DELETE FROM "${this._schema}"."${table}" WHERE _id = $1`, [id]);
+		this._guardrail?.enforceWrite(table, this._enforceOpts(table));
+		const query = this._tenantId
+			? `DELETE FROM "${this._schema}"."${table}" WHERE _id = $1 AND tenant_id = $2`
+			: `DELETE FROM "${this._schema}"."${table}" WHERE _id = $1`;
+		const params = this._tenantId ? ([id, this._tenantId] as unknown[]) : ([id] as unknown[]);
+		await this._pool.query(query, params);
 		this._emitChange(table, "DELETE", id);
 		this._dispatch(table, "DELETE", { _id: id });
 	}
@@ -370,5 +419,60 @@ export class DatabaseWriter extends DatabaseReader {
 			.catch((err) => {
 				console.error(`[betterbase] onChange hook failed for ${type} on ${table}:`, err);
 			});
+	}
+}
+
+// ─── DbContext (tenant-aware) ──────────────────────────────────────────────
+
+/**
+ * Tenant-aware database context.
+ *
+ * Wraps a {@link DatabaseReader} / {@link DatabaseWriter} pair and, when tenant
+ * mode is configured, enforces tenant scoping on every read/write via the
+ * {@link GuardrailEngine}. When no guardrail engine is active (tenant mode off)
+ * everything passes through unchanged — fully backwards compatible.
+ */
+export class DbContext {
+	readonly reader: DatabaseReader;
+	readonly writer: DatabaseWriter;
+
+	constructor(
+		pool: Pool,
+		schema: string,
+		options?: {
+			guardrail?: GuardrailEngine | null;
+			tenantId?: string;
+			tenantExemptTables?: string[];
+		},
+	) {
+		const { guardrail = null, tenantId, tenantExemptTables = [] } = options ?? {};
+		this.reader = new DatabaseReader(
+			pool,
+			schema,
+			guardrail,
+			tenantId,
+			tenantExemptTables,
+		);
+		this.writer = new DatabaseWriter(
+			pool,
+			schema,
+			guardrail,
+			tenantId,
+			tenantExemptTables,
+		);
+	}
+
+	/**
+	 * Return a new context bound to a tenant. The returned context enforces the
+	 * tenant id on all subsequent reads/writes. The original context is
+	 * unaffected.
+	 */
+	asTenant(tenantId: string): DbContext {
+		const ctx = this.reader._contextParams();
+		return new DbContext(ctx.pool, ctx.schema, {
+			guardrail: ctx.guardrail ?? null,
+			tenantId,
+			tenantExemptTables: ctx.tenantExemptTables,
+		});
 	}
 }

@@ -51,8 +51,7 @@ export {
 	type MutationRegistration,
 	type ActionRegistration,
 } from "./functions";
-export { DatabaseReader, DatabaseWriter, IaCQueryBuilder } from "./db-context";
-export { text, number, boolean, timestamp, id, type ColumnMeta, type ColumnBuilder } from "./columns";
+export { DatabaseReader, DatabaseWriter, IaCQueryBuilder, DbContext } from "./db-context";
 export {
 	discoverFunctions,
 	setFunctionRegistry,

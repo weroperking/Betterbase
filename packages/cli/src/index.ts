@@ -30,6 +30,51 @@ import {
 	runStorageUploadCommand,
 } from "./commands/storage";
 import { runWebhookCommand } from "./commands/webhook";
+import {
+	runPipelineGenerate,
+	runPipelineValidate,
+	runPipelineRun,
+	runPipelineStatus,
+	type PipelineOptions,
+} from "./commands/pipeline";
+import {
+	runInfraInit,
+	runInfraValidate,
+	runInfraPlan,
+	runInfraApply,
+	runInfraDestroy,
+	type InfraOptions,
+} from "./commands/infra";
+import { runDeployCommand, type DeployOptions } from "./commands/deploy";
+import {
+	runMonitorLogs,
+	runMonitorMetrics,
+	runMonitorAlerts,
+	runMonitorStatus,
+	type MonitorOptions,
+} from "./commands/monitor";
+import {
+	runScaleStatus,
+	runScaleConfig,
+	runScaleEvents,
+	runScaleNow,
+	type ScaleOptions,
+} from "./commands/scale";
+import {
+	runPatchCheck,
+	runPatchApply,
+	runPatchSchedule,
+	runPatchRollback,
+	type PatchOptions,
+} from "./commands/patch";
+import {
+	runMaintainBackup,
+	runMaintainRestore,
+	runMaintainCleanup,
+	runMaintainOptimize,
+	runMaintainMigrate,
+	type MaintainOptions,
+} from "./commands/maintain";
 import * as logger from "./utils/logger";
 
 // Commands that don't require authentication
@@ -39,6 +84,13 @@ const PUBLIC_COMMANDS = [
 	"version",
 	"help",
 	"init",
+	"pipeline",
+	"infra",
+	"deploy",
+	"monitor",
+	"scale",
+	"patch",
+	"maintain",
 	"--version",
 	"-V",
 	"--help",
@@ -608,6 +660,321 @@ iac
 		.action(async (options: { projectRoot?: string }) => {
 			const projectRoot = options.projectRoot || process.cwd();
 			await runBranchCommand([], projectRoot);
+		});
+
+	// ── Stage 3: CI/CD & Deployment ─────────────────────────────────────────────
+	const pipeline = program.command("pipeline").description("CI/CD pipeline management");
+
+	pipeline
+		.command("generate")
+		.description("Generate a CI/CD pipeline config")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without writing")
+		.option("--force", "overwrite existing pipeline file")
+		.action(async (options: PipelineOptions) => {
+			await runPipelineGenerate(options);
+		});
+
+	pipeline
+		.command("validate")
+		.description("Validate the pipeline config for required steps")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: PipelineOptions) => {
+			await runPipelineValidate(options);
+		});
+
+	pipeline
+		.command("run")
+		.description("Run the pipeline steps locally")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--local", "run steps locally")
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview steps without running")
+		.action(async (options: PipelineOptions) => {
+			await runPipelineRun(options);
+		});
+
+	pipeline
+		.command("status")
+		.description("Show the last local pipeline run status")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: PipelineOptions) => {
+			await runPipelineStatus(options);
+		});
+
+	const infra = program.command("infra").description("Infrastructure-as-Code management");
+
+	infra
+		.command("init")
+		.description("Scaffold a default infrastructure config")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without writing")
+		.option("--force", "overwrite existing config")
+		.action(async (options: InfraOptions) => {
+			await runInfraInit(options);
+		});
+
+	infra
+		.command("validate")
+		.description("Validate the infrastructure config schema")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: InfraOptions) => {
+			await runInfraValidate(options);
+		});
+
+	infra
+		.command("plan")
+		.description("Preview infrastructure changes")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: InfraOptions) => {
+			await runInfraPlan(options);
+		});
+
+	infra
+		.command("apply")
+		.description("Apply infrastructure changes")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without applying")
+		.option("--force", "skip confirmation")
+		.option("--auto-approve", "apply without confirmation")
+		.action(async (options: InfraOptions & { autoApprove?: boolean }) => {
+			await runInfraApply(options);
+		});
+
+	infra
+		.command("destroy")
+		.description("Destroy tracked infrastructure state")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without destroying")
+		.option("--force", "skip confirmation")
+		.action(async (options: InfraOptions) => {
+			await runInfraDestroy(options);
+		});
+
+	const deploy = program.command("deploy").description("Deployment orchestration");
+
+	const deployOpts = (cmd: Command): Command =>
+		cmd
+			.option("--project <path>", "target project directory", process.cwd())
+			.option("--env <env>", "target environment", "production")
+			.option("--strategy <strategy>", "blue-green | canary | rolling", "blue-green")
+			.option("--no-build", "skip the build step")
+			.option("--json", "structured JSON output")
+			.option("--dry-run", "preview without deploying")
+			.option("--force", "skip confirmation");
+
+	deployOpts(deploy).action(async (options: DeployOptions) => {
+		await runDeployCommand("deploy", options);
+	});
+
+	deployOpts(deploy.command("canary").description("Deploy a canary release")).action(
+		async (options: DeployOptions) => {
+			await runDeployCommand("canary", options);
+		},
+	);
+
+	deployOpts(deploy.command("preview").description("Create a preview deployment")).action(
+		async (options: DeployOptions) => {
+			await runDeployCommand("preview", options);
+		},
+	);
+
+	deployOpts(deploy.command("rollback").description("Roll back to the previous deployment")).action(
+		async (options: DeployOptions) => {
+			await runDeployCommand("rollback", options);
+		},
+	);
+
+	// ── Stage 4: Post-Production & Operations ────────────────────────────────────
+	const monitor = program.command("monitor").description("Monitoring & observability");
+
+	monitor
+		.command("logs")
+		.description("Read local application logs")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--since <duration>", "only show logs since (e.g. 1h, 30m, 7d)")
+		.option("--limit <n>", "max lines to show", "200")
+		.option("--json", "structured JSON output")
+		.action(async (options: MonitorOptions) => {
+			await runMonitorLogs(options);
+		});
+
+	monitor
+		.command("metrics")
+		.description("View aggregated metrics")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--since <duration>", "period (e.g. 1h, 24h)")
+		.option("--json", "structured JSON output")
+		.action(async (options: MonitorOptions) => {
+			await runMonitorMetrics(options);
+		});
+
+	monitor
+		.command("alerts")
+		.description("List, add, or remove alert rules")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--add <rule>", 'add rule, e.g. "high-cpu:cpu > 80"')
+		.option("--remove <id>", "remove rule by id or name")
+		.option("--json", "structured JSON output")
+		.action(async (options: MonitorOptions & { add?: string; remove?: string }) => {
+			await runMonitorAlerts(options);
+		});
+
+	monitor
+		.command("status")
+		.description("Overall project status")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: MonitorOptions) => {
+			await runMonitorStatus(options);
+		});
+
+	const scale = program.command("scale").description("Auto-scaling management");
+
+	scale
+		.command("status")
+		.description("Show current scaling status")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: ScaleOptions) => {
+			await runScaleStatus(options);
+		});
+
+	scale
+		.command("config")
+		.description("Get or set scaling config (e.g. --set cpu=60,min=2,max=5)")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--set <pairs>", "comma-separated key=value pairs")
+		.option("--json", "structured JSON output")
+		.action(async (options: ScaleOptions) => {
+			await runScaleConfig(options);
+		});
+
+	scale
+		.command("events")
+		.description("List scaling events")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.action(async (options: ScaleOptions) => {
+			await runScaleEvents(options);
+		});
+
+	scale
+		.command("now")
+		.description("Trigger a manual scale (--replicas <n>)")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--replicas <n>", "target replica count")
+		.option("--json", "structured JSON output")
+		.action(async (options: ScaleOptions) => {
+			await runScaleNow(options);
+		});
+
+	const patch = program.command("patch").description("Security patching");
+
+	patch
+		.command("check")
+		.description("Check for dependency vulnerabilities")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without running audit")
+		.action(async (options: PatchOptions) => {
+			await runPatchCheck(options);
+		});
+
+	patch
+		.command("apply")
+		.description("Apply security patches")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--auto", "auto-apply safe patches")
+		.option("--force", "apply without confirmation")
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without applying")
+		.action(async (options: PatchOptions) => {
+			await runPatchApply(options);
+		});
+
+	patch
+		.command("schedule")
+		.description("Schedule automatic patching")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--schedule <frequency>", "daily | weekly | monthly", "weekly")
+		.option("--auto", "auto-apply safe patches on schedule")
+		.option("--json", "structured JSON output")
+		.action(async (options: PatchOptions) => {
+			await runPatchSchedule(options);
+		});
+
+	patch
+		.command("rollback")
+		.description("Restore backed-up manifests")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without restoring")
+		.action(async (options: PatchOptions) => {
+			await runPatchRollback(options);
+		});
+
+	const maintain = program.command("maintain").description("Maintenance workflows");
+
+	maintain
+		.command("backup")
+		.description("Create a database backup")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without backing up")
+		.action(async (options: MaintainOptions) => {
+			await runMaintainBackup(options);
+		});
+
+	maintain
+		.command("restore")
+		.description("Restore from a backup")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--file <path>", "backup file to restore (defaults to latest)")
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without restoring")
+		.option("--force", "skip confirmation")
+		.action(async (options: MaintainOptions) => {
+			await runMaintainRestore(options);
+		});
+
+	maintain
+		.command("cleanup")
+		.description("Remove old logs and backups")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--keep <n>", "number of newest files to keep per type", "5")
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without deleting")
+		.action(async (options: MaintainOptions) => {
+			await runMaintainCleanup(options);
+		});
+
+	maintain
+		.command("optimize")
+		.description("Optimize the database (VACUUM/ANALYZE)")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview without running")
+		.action(async (options: MaintainOptions) => {
+			await runMaintainOptimize(options);
+		});
+
+	maintain
+		.command("migrate")
+		.description("Run database migrations")
+		.option("--project <path>", "target project directory", process.cwd())
+		.option("--json", "structured JSON output")
+		.option("--dry-run", "preview migration diff only")
+		.action(async (options: MaintainOptions) => {
+			await runMaintainMigrate(options);
 		});
 
 program

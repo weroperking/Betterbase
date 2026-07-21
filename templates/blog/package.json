@@ -1,0 +1,17 @@
+{
+  "name": "my-betterbase-blog",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev":   "bb dev",
+    "sync":  "bb iac sync",
+    "diff":  "bb iac diff",
+    "gen":   "bb iac generate"
+  },
+  "dependencies": {
+    "@betterbase/core":   "workspace:*",
+    "@betterbase/client": "workspace:*",
+    "@betterbase/server": "workspace:*",
+    "hono": "^4.0.0"
+  }
+}

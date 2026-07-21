@@ -1,7 +1,7 @@
-import type { SerializedSchema } from "@betterbase/core/iac";
+import { ProjectEnvironment } from "./env-detector";
 import { createApiClient } from "../../utils/api-client";
 import { isAuthenticated } from "../../utils/credentials";
-import type { ProjectEnvironment } from "./env-detector";
+import { SerializedSchema } from "@betterbase/core/iac";
 
 export interface SyncWithServerOptions {
 	schema: SerializedSchema;

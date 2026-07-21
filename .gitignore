@@ -30,3 +30,6 @@ coverage/
 .DS_Store
 
 .vercel/
+
+# Kilo internal artifacts
+.kilo/plans/
