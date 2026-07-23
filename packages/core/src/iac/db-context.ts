@@ -300,8 +300,15 @@ export class DatabaseWriter extends DatabaseReader {
 	private _mutations: (() => Promise<void>)[] = [];
 	private _onChange?: ChangeHook;
 
-	constructor(pool: Pool, schema: string, options?: { onChange?: ChangeHook }) {
-		super(pool, schema);
+	constructor(
+		pool: Pool,
+		schema: string,
+		guardrail?: GuardrailEngine | null,
+		tenantId?: string,
+		tenantExemptTables: string[] = [],
+		options?: { onChange?: ChangeHook },
+	) {
+		super(pool, schema, guardrail, tenantId, tenantExemptTables);
 		this._onChange = options?.onChange;
 	}
 

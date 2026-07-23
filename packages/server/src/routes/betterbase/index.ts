@@ -90,7 +90,7 @@ betterbaseRouter.post("/:kind/*", async (c) => {
 		} else if (fn.kind === "mutation") {
 			const storage = buildStorageCtx(pool, projectSlug);
 			const scheduler = buildSchedulerCtx(pool, projectSlug);
-			const writer = new DatabaseWriter(pool, dbSchema, { onChange: buildWebhookOnChange() });
+			const writer = new DatabaseWriter(pool, dbSchema, undefined, undefined, [], { onChange: buildWebhookOnChange() });
 			const ctx = { db: writer, auth: authCtx, storage, scheduler };
 			result = await (fn.handler as any)._handler(ctx, parsed.data);
 		} else {
@@ -195,7 +195,7 @@ function buildActionCtx(pool: any, dbSchema: string, auth: any, projectSlug: str
 		},
 		runMutation: async (fn: any, args: any) => {
 			const ctx = {
-				db: new DatabaseWriter(pool, dbSchema, { onChange: buildWebhookOnChange() }),
+				db: new DatabaseWriter(pool, dbSchema, undefined, undefined, [], { onChange: buildWebhookOnChange() }),
 				auth,
 				storage: buildStorageCtx(pool, projectSlug),
 				scheduler: buildSchedulerCtx(pool, projectSlug),
