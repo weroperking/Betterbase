@@ -8,9 +8,20 @@
  */
 
 import crypto from "crypto";
-import sharp from "sharp";
 import { logger } from "../logger";
 import type { ImageTransformOptions, TransformResult, TransformCacheKey } from "./types";
+
+let sharp: typeof import("sharp") | undefined;
+function getSharp() {
+	if (!sharp) {
+		try {
+			sharp = require("sharp");
+		} catch {
+			sharp = undefined;
+		}
+	}
+	return sharp;
+}
 
 /**
  * Supported input MIME types for transformation
@@ -69,7 +80,13 @@ export class ImageTransformer {
 			inputSize: buffer.length,
 		});
 
-		let sharpInstance = sharp(buffer);
+		const s = getSharp();
+		if (!s) {
+			throw new Error(
+				"Image transformation is not available: 'sharp' is not installed for this platform. Install sharp or disable image transforms.",
+			);
+		}
+		let sharpInstance = s(buffer);
 
 		// Get metadata for logging
 		const metadata = await sharpInstance.metadata();
@@ -95,7 +112,7 @@ export class ImageTransformer {
 
 		// Get output buffer
 		const outputBuffer = await sharpInstance.toBuffer();
-		const outputMetadata = await sharp(outputBuffer).metadata();
+		const outputMetadata = await getSharp()!(outputBuffer).metadata();
 
 		const result: TransformResult = {
 			buffer: outputBuffer,
@@ -122,10 +139,10 @@ export class ImageTransformer {
 	 * Apply format and quality settings to Sharp instance
 	 */
 	private applyFormat(
-		sharpInstance: sharp.Sharp,
+		sharpInstance: any,
 		format: string,
 		quality: number,
-	): sharp.Sharp {
+	): any {
 		switch (format) {
 			case "webp":
 				return sharpInstance.webp({ quality });

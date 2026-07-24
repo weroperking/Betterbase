@@ -27,22 +27,23 @@ const logLevel = process.env.LOG_LEVEL || (isDev ? 'debug' : 'info');
 let loggerInstance: pino.Logger;
 
 if (isDev) {
-  // Development: Pretty console output
-  loggerInstance = pino({
-    level: logLevel,
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'HH:MM:ss.l',
-        ignore: 'pid,hostname',
+  try {
+    loggerInstance = pino({
+      level: logLevel,
+      transport: {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'HH:MM:ss.l',
+          ignore: 'pid,hostname',
+        },
       },
-    },
-  });
+    });
+  } catch {
+    loggerInstance = pino({ level: logLevel });
+  }
 } else {
   // Production: JSON to console + file
-  // Note: In a real app, you'd want to set this up properly
-  // For now, we'll create a sync logger that outputs to console
   loggerInstance = pino({
     level: logLevel,
   });
