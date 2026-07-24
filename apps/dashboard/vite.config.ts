@@ -9,8 +9,6 @@ export default defineConfig({
 		alias: { "@": path.resolve(__dirname, "./src") },
 	},
 	define: {
-		"import.meta.env.VITE_API_URL": JSON.stringify(
-			process.env.VITE_API_URL ?? "http://localhost:3001",
-		),
+		"import.meta.env.VITE_API_URL": JSON.stringify("http://localhost:3000"),
 	},
 });
