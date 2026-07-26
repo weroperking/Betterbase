@@ -8,12 +8,15 @@ import { runFunctionCommand } from "./commands/function";
 import { runGenerateCrudCommand } from "./commands/generate";
 import { runGenerateGraphqlCommand, runGraphqlPlaygroundCommand } from "./commands/graphql";
 import { runIacAnalyze } from "./commands/iac/analyze";
+import { runIacDiff } from "./commands/iac/diff";
 import { runIacExport } from "./commands/iac/export";
 import { runMigrateLegacyToIaC } from "./commands/iac/migrate-legacy";
 import { runIacGenerate } from "./commands/iac/generate";
 import { runIacImport } from "./commands/iac/import";
 import { runIacSync } from "./commands/iac/sync";
 import { runInitCommand } from "./commands/init";
+import { runConfigureCommand, runRollbackCommand, type ConfigureCommandOptions } from "./commands/configure";
+import { runDepsInstallCommand } from "./commands/deps";
 import { isAuthenticated, runLoginCommand, runLogoutCommand } from "./commands/login";
 import { runValidateProject } from "./commands/validate";
 import {
@@ -84,6 +87,9 @@ const PUBLIC_COMMANDS = [
 	"version",
 	"help",
 	"init",
+	"configure",
+	"deps",
+	"iac",
 	"pipeline",
 	"infra",
 	"deploy",
@@ -195,6 +201,43 @@ program
 	.argument("[project-name]", "project name")
 	.action(async (projectName: string | undefined) => {
 		await runInitCommand({ projectName });
+	});
+
+	program
+	.command("configure")
+	.description("Configure project settings (provider, database, port)")
+	.option("--provider <provider>", "Database provider (postgres, neon, supabase, planetscale, turso, managed)")
+	.option("--database-url <url>", "Database connection URL")
+	.option("--turso-url <url>", "Turso libSQL connection URL")
+	.option("--turso-auth-token <token>", "Turso authentication token")
+	.option("--port <port>", "Application port")
+	.option("--auto-register", "Enable auto-registration with server")
+	.option("--dry-run", "Preview changes without applying")
+	.option("--json", "Output changes as JSON")
+	.argument("[project-root]", "project root directory", process.cwd())
+	.action(async (projectRoot: string, options: ConfigureCommandOptions) => {
+		await runConfigureCommand({ ...options, projectRoot });
+	});
+
+	program
+		.command("configure rollback")
+		.description("Roll back configure changes to a previous backup")
+		.option("--to <timestamp>", "Restore to a specific backup timestamp")
+		.option("--list", "List available backups")
+		.argument("[project-root]", "project root directory", process.cwd())
+		.action(async (projectRoot: string, options: { to?: string; list?: boolean }) => {
+			await runRollbackCommand(projectRoot, { to: options.to, list: options.list });
+		});
+
+	program
+	.command("deps")
+	.description("Install project dependencies")
+	.option("--force", "Force reinstall all dependencies")
+	.option("--check", "Validate lockfile consistency without installing")
+	.option("--dry-run", "Preview changes without installing")
+	.argument("[project-root]", "project root directory", process.cwd())
+	.action(async (projectRoot: string, options: { force?: boolean; check?: boolean; dryRun?: boolean }) => {
+		await runDepsInstallCommand({ projectRoot, force: options.force, check: options.check, dryRun: options.dryRun });
 	});
 
 	program
@@ -312,6 +355,15 @@ iac
 			environment: options.environment
 		});
 	});
+
+	iac
+		.command("diff")
+		.description("Preview pending schema changes against last synced state")
+		.argument("[project-root]", "project root directory", process.cwd())
+		.option("--json", "Output diff as JSON")
+		.action(async (projectRoot: string, options: { json?: boolean }) => {
+			await runIacDiff(projectRoot, { json: options.json });
+		});
 
 	iac
 		.command("generate")

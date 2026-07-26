@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { z } from "zod";
@@ -21,11 +21,75 @@ const initOptionsSchema = z.object({
 
 export type InitCommandOptions = z.infer<typeof initOptionsSchema>;
 
+const PACKAGES_TO_BUNDLE = ["core", "server", "client", "shared"] as const;
+
+function getBetterbaseRoot(): string {
+	let dir = import.meta.dir;
+	while (dir !== path.dirname(dir)) {
+		const marker = path.join(dir, "packages", "server", "package.json");
+		if (existsSync(marker)) return dir;
+		dir = path.dirname(dir);
+	}
+	return dir;
+}
+
+async function copyDirRecursive(src: string, dest: string): Promise<void> {
+	const entries = await readdir(src, { withFileTypes: true });
+	await mkdir(dest, { recursive: true });
+	for (const entry of entries) {
+		const srcPath = path.join(src, entry.name);
+		const destPath = path.join(dest, entry.name);
+		if (entry.isDirectory()) {
+			await copyDirRecursive(srcPath, destPath);
+		} else if (entry.isFile()) {
+			await copyFile(srcPath, destPath);
+		}
+	}
+}
+
+async function bundleLocalPackages(targetDir: string): Promise<void> {
+	const betterbaseRoot = getBetterbaseRoot();
+	if (targetDir.startsWith(betterbaseRoot)) {
+		return;
+	}
+
+	for (const pkgName of PACKAGES_TO_BUNDLE) {
+		const srcDir = path.join(betterbaseRoot, "packages", pkgName);
+		const destDir = path.join(targetDir, "node_modules", "@betterbase", pkgName);
+		if (!existsSync(srcDir)) continue;
+
+		await mkdir(path.dirname(destDir), { recursive: true });
+		await rm(destDir, { recursive: true, force: true });
+		await copyDirRecursive(srcDir, destDir);
+
+		const innerNodeModules = path.join(destDir, "node_modules");
+		if (existsSync(innerNodeModules)) {
+			await rm(innerNodeModules, { recursive: true, force: true });
+		}
+
+		try {
+			const pkgPath = path.join(destDir, "package.json");
+			const pkg = JSON.parse(await readFile(pkgPath, "utf-8"));
+			if (pkg.main?.endsWith(".ts")) {
+				const distIndex = path.join(destDir, "dist", "index.js");
+				if (existsSync(distIndex)) {
+					pkg.main = "./dist/index.js";
+					pkg.module = "./dist/index.js";
+				}
+			}
+			await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+		} catch {
+			// ignore package.json rewrite failures
+		}
+	}
+}
+
 /**
  * Copy the IaC template to the target directory
  */
 async function copyIaCTemplate(targetDir: string, projectName: string): Promise<void> {
 	const possibleTemplatePaths = [
+		path.join(import.meta.dir, "..", "templates", "iac"),
 		path.join(import.meta.dir, "..", "..", "..", "..", "templates", "iac"),
 		path.join(import.meta.dir, "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
 		path.join(import.meta.dir, "..", "..", "..", "..", "..", "..", "betterbase", "templates", "iac"),
@@ -42,7 +106,7 @@ async function copyIaCTemplate(targetDir: string, projectName: string): Promise<
 
 	if (!templateDir) {
 		throw new Error(
-			`IaC template not found. Searched:\n${possibleTemplatePaths.map((p) => `  - ${p}`).join("\n")}`
+			`IaC template not found. Searched:\n${possibleTemplatePaths.map((p) => `  - ${p}`).join("\n")}`,
 		);
 	}
 
@@ -146,6 +210,8 @@ local.db
 drizzle
 `,
 	);
+
+	await bundleLocalPackages(targetDir);
 
 	logger.success("IaC template copied to " + targetDir);
 }

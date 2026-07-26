@@ -19,5 +19,8 @@
   },
   "default_agent": "code",
   "model": "kilo/auto-free",
-  "autoupdate": false
+  "autoupdate": false,
+  "indexing": {
+    "enabled": true
+  }
 }

@@ -109,6 +109,23 @@ export async function runIacSync(
 	await mkdir(genDir, { recursive: true });
 	await saveSerializedSchema(current, prevFile);
 
+	// Compile schema.ts to a JS module so diff.ts can import it from dist/
+	// without requiring tsx/register or a loader flag.
+	try {
+		const compileResult = await Bun.build({
+			entrypoints: [schemaFile],
+			outdir: genDir,
+			format: "esm",
+			target: "node",
+			naming: "[name].compiled.js",
+		});
+		if (!compileResult.success) {
+			warn("Failed to compile schema.ts for dist compatibility");
+		}
+	} catch {
+		warn("Failed to compile schema.ts for dist compatibility");
+	}
+
 	// 4. HEADLESS SYNC: Auto-sync with server
 	if (opts.headless || opts.autoRegister) {
 		if (!opts.silent) {
