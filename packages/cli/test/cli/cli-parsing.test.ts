@@ -555,13 +555,79 @@ describe("CLI argument parsing regression", () => {
 		});
 	});
 
-	describe("branch", () => {
-		const program = createProgram();
-		const branch = findCmd(program, "branch")!;
+describe("configure", () => {
+	const program = createProgram();
+	const configure = findCmd(program, "configure")!;
 
-		it("registers branch command", () => {
-			expect(branch).toBeDefined();
+	it("registers configure command", () => {
+		expect(configure).toBeDefined();
+	});
+
+	it("has --provider option", () => {
+		expect(findOpt(configure, "provider")).toBeDefined();
+	});
+
+	it("has --database-url option", () => {
+		expect(findOpt(configure, "database-url")).toBeDefined();
+	});
+
+	it("has --dry-run option (Task 2)", () => {
+		expect(findOpt(configure, "dry-run")).toBeDefined();
+	});
+
+	it("has --json option (Task 8)", () => {
+		expect(findOpt(configure, "json")).toBeDefined();
+	});
+
+	describe("configure rollback (Task 4)", () => {
+		const rollback = findCmd(configure, "rollback")!;
+
+		it("registers rollback as a subcommand of configure", () => {
+			expect(rollback).toBeDefined();
 		});
+
+		it("has --to option for restoring a specific backup", () => {
+			expect(findOpt(rollback, "to")).toBeDefined();
+		});
+
+		it("has --list option for listing backups", () => {
+			expect(findOpt(rollback, "list")).toBeDefined();
+		});
+
+		it("has optional project-root argument", () => {
+			expect(findArg(rollback, "project-root")).toBeDefined();
+		});
+	});
+});
+
+describe("deps", () => {
+	const program = createProgram();
+	const deps = findCmd(program, "deps")!;
+
+	it("registers deps command", () => {
+		expect(deps).toBeDefined();
+	});
+
+	it("has --dry-run option (Task 2)", () => {
+		expect(findOpt(deps, "dry-run")).toBeDefined();
+	});
+
+	it("has --check option (Task 6)", () => {
+		expect(findOpt(deps, "check")).toBeDefined();
+	});
+
+	it("has --force option", () => {
+		expect(findOpt(deps, "force")).toBeDefined();
+	});
+});
+
+describe("branch", () => {
+	const program = createProgram();
+	const branch = findCmd(program, "branch")!;
+
+	it("registers branch command", () => {
+		expect(branch).toBeDefined();
+	});
 
 		describe("branch create", () => {
 			const create = findCmd(branch, "create")!;

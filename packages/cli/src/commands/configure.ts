@@ -14,7 +14,10 @@ const configureOptionsSchema = z.object({
 	"turso-url": z.string().optional(),
 	"turso-auth-token": z.string().optional(),
 	port: z.coerce.number().optional(),
+	// Caller-friendly: accept both spellings. Commander passes camelCase,
+	// ad-hoc callers (and tests) may still pass the kebab key.
 	"auto-register": z.boolean().optional(),
+	autoRegister: z.boolean().optional(),
 	dryRun: z.boolean().optional(),
 	json: z.boolean().optional(),
 });
@@ -215,6 +218,9 @@ export async function runConfigureCommand(rawOptions: ConfigureCommandOptions): 
 	const options = configureOptionsSchema.parse(rawOptions);
 	const projectRoot = options.projectRoot ?? process.cwd();
 	const outputJson = options.json ?? false;
+	// Accept both spellings (manual callers may still pass the kebab key) but
+	// normalize to a single local so downstream code reads cleanly.
+	const autoRegister = options.autoRegister ?? options["auto-register"];
 
 	if (!outputJson) {
 		logger.blank();
@@ -308,7 +314,7 @@ export async function runConfigureCommand(rawOptions: ConfigureCommandOptions): 
 		}
 	}
 
-	if (options["auto-register"]) {
+	if (autoRegister) {
 		const oldMatch = configContent.match(/^\t+autoRegister:\s*(.*)$/m);
 		const oldValue = oldMatch?.[1]?.trim() ?? "(not set)";
 		const newValue = "true";
@@ -328,8 +334,18 @@ export async function runConfigureCommand(rawOptions: ConfigureCommandOptions): 
 	}
 
 	if (options.dryRun) {
+		const jsonOutput = changes.map((c) => ({ file: c.file, key: c.key, oldValue: c.oldValue, newValue: c.newValue }));
+		// Run a post-mutation validation pass so `--dry-run --json` consumers
+		// (CI/CD previews) see the same failure signal they'd get if the change
+		// were applied — fulfills the Task 5/8 contract for preview flows.
+		const dryRunErrors = await validatePostChangeConfig(projectRoot);
 		if (outputJson) {
-			const jsonOutput = changes.map((c) => ({ file: c.file, key: c.key, oldValue: c.oldValue, newValue: c.newValue }));
+			if (dryRunErrors.length > 0) {
+				console.log(
+					JSON.stringify({ errors: dryRunErrors, changes: jsonOutput }, null, 2),
+				);
+				return;
+			}
 			console.log(JSON.stringify(jsonOutput, null, 2));
 			return;
 		}
@@ -341,7 +357,14 @@ export async function runConfigureCommand(rawOptions: ConfigureCommandOptions): 
 			console.log(chalk.green(`    + ${change.newValue}`));
 			logger.blank();
 		}
-		logger.info("No files modified (dry-run mode).");
+		if (dryRunErrors.length > 0) {
+			logger.error("Configuration validation would fail after applying these changes:");
+			dryRunErrors.forEach((err) => console.log(`  ${logger.sym.error} ${err}`));
+			logger.blank();
+			logger.warn("You can restore the previous configuration by running: bb configure rollback");
+		} else {
+			logger.info("No files modified (dry-run mode).");
+		}
 		return;
 	}
 
@@ -369,21 +392,26 @@ export async function runConfigureCommand(rawOptions: ConfigureCommandOptions): 
 		await writeFile(path.join(projectRoot, ".env"), envNewContent);
 	}
 
-	if (!outputJson) {
-		const validationErrors = await validatePostChangeConfig(projectRoot);
-		if (validationErrors.length > 0) {
-			logger.error("Configuration validation failed:");
-			validationErrors.forEach((err) => console.log(`  ${logger.sym.error} ${err}`));
-			logger.blank();
-			logger.warn("You can restore the previous configuration by running: bb configure rollback");
-			logger.blank();
-			return;
-		}
-	}
+	// Run post-change validation regardless of output mode so that CI/JSON
+	// consumers get a deterministic failure signal (Task 5 + Task 8 contract).
+	const validationErrors = await validatePostChangeConfig(projectRoot);
 
 	if (outputJson) {
 		const jsonOutput = changes.map((c) => ({ file: c.file, key: c.key, oldValue: c.oldValue, newValue: c.newValue }));
+		if (validationErrors.length > 0) {
+			console.log(JSON.stringify({ errors: validationErrors, changes: jsonOutput }, null, 2));
+			return;
+		}
 		console.log(JSON.stringify(jsonOutput, null, 2));
+		return;
+	}
+
+	if (validationErrors.length > 0) {
+		logger.error("Configuration validation failed:");
+		validationErrors.forEach((err) => console.log(`  ${logger.sym.error} ${err}`));
+		logger.blank();
+		logger.warn("You can restore the previous configuration by running: bb configure rollback");
+		logger.blank();
 		return;
 	}
 

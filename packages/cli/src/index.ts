@@ -203,7 +203,7 @@ program
 		await runInitCommand({ projectName });
 	});
 
-	program
+	const configure = program
 	.command("configure")
 	.description("Configure project settings (provider, database, port)")
 	.option("--provider <provider>", "Database provider (postgres, neon, supabase, planetscale, turso, managed)")
@@ -219,8 +219,8 @@ program
 		await runConfigureCommand({ ...options, projectRoot });
 	});
 
-	program
-		.command("configure rollback")
+	configure
+		.command("rollback")
 		.description("Roll back configure changes to a previous backup")
 		.option("--to <timestamp>", "Restore to a specific backup timestamp")
 		.option("--list", "List available backups")
